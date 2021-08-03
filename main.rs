@@ -18,7 +18,7 @@ impl Sphere {
     fn intersect(&self, ray_origin: &Vector3, ray_direction: &UVector3) -> Option<f32> {
         let r2 = self.radius * self.radius;
         let l = self.center - ray_origin;
-        let tca = l.dot(&ray_direction);
+        let tca = l.dot(ray_direction);
         let d2 = l.dot(&l) - tca * tca;
 
         if d2 > r2 {
@@ -106,7 +106,7 @@ fn main() {
             for r in rays {
                 let mut closest_hit: Option<(&Sphere, f32)> = None;
                 for o in &scene {
-                    if let Some(hit) = o.intersect(&cam_pos, &r) {
+                    if let Some(hit) = o.intersect(&cam_pos, r) {
                         let closest = match closest_hit {
                             Some(c) => hit < c.1,
                             None => true,
@@ -120,8 +120,8 @@ fn main() {
 
                 if let Some(hit) = closest_hit {
                     let hit_pos = cam_pos + r.into_inner() * hit.1;
-                    let normal = na::Unit::<Vector3>::new_normalize(hit_pos - hit.0.center);
-                    let light_dir = na::Unit::<Vector3>::new_normalize(light_pos - hit_pos);
+                    let normal = UVector3::new_normalize(hit_pos - hit.0.center);
+                    let light_dir = UVector3::new_normalize(light_pos - hit_pos);
                     let ndl = light_dir.dot(&normal);
 
                     color += hit.0.color * ndl / rays.len() as f32;
