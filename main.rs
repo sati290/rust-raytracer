@@ -45,7 +45,11 @@ fn color_vec_to_rgb(v: Vector3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
 
-fn generate_camera_rays(image_width: u32, image_height: u32, horiz_fog_deg: f32) -> Vec<(u32, u32, Vec<UVector3>)> {
+fn generate_camera_rays(
+    image_width: u32,
+    image_height: u32,
+    horiz_fog_deg: f32,
+) -> Vec<(u32, u32, Vec<UVector3>)> {
     let subpixels = [
         Vector2::new(5. / 8., 1. / 8.),
         Vector2::new(1. / 8., 3. / 8.),
@@ -53,19 +57,23 @@ fn generate_camera_rays(image_width: u32, image_height: u32, horiz_fog_deg: f32)
         Vector2::new(3. / 8., 7. / 8.),
     ];
 
-    let aspect = image_height as f32 / image_width as f32;
     let plane_dist = (horiz_fog_deg.to_radians() / 2.).tan();
-    let image_dims_recip = Vector2::new(1. / image_width as f32, 1. / image_height as f32);
+    let image_dims_recip = Vector2::new(
+        1. / image_width as f32,
+        1. / image_width /* width used here to handle aspect */ as f32,
+    );
 
-    let mut rays = Vec::<(u32, u32, Vec::<UVector3>)>::with_capacity((image_width * image_height) as usize);
+    let mut rays =
+        Vec::<(u32, u32, Vec<UVector3>)>::with_capacity((image_width * image_height) as usize);
     for x in 0..image_width {
         for y in 0..image_height {
             let mut sp_rays = Vec::<UVector3>::with_capacity(subpixels.len());
-            
+
             let px = Vector2::new(x as f32, (image_height - y) as f32);
+            let px = px - Vector2::new(image_width as f32 / 2., image_height as f32 / 2.);
             for sp in subpixels {
-                let px = (px + sp).component_mul(&image_dims_recip) - Vector2::new(0.5, 0.5);
-                let ray = UVector3::new_normalize(Vector3::new(px.x, px.y * aspect, plane_dist));
+                let px = (px + sp).component_mul(&image_dims_recip);
+                let ray = UVector3::new_normalize(Vector3::new(px.x, px.y, plane_dist));
                 sp_rays.push(ray);
             }
 
