@@ -6,16 +6,17 @@ use std::time::Instant;
 type Vector2 = na::Vector2<f32>;
 type Vector3 = na::Vector3<f32>;
 type UVector3 = na::Unit<Vector3>;
+type Point3 = na::Point3<f32>;
 type Matrix4 = na::Matrix4<f32>;
 
 struct Sphere {
-    center: Vector3,
+    center: Point3,
     radius: f32,
     color: Vector3,
 }
 
 impl Sphere {
-    fn intersect(&self, ray_origin: &Vector3, ray_direction: &UVector3) -> Option<f32> {
+    fn intersect(&self, ray_origin: &Point3, ray_direction: &UVector3) -> Option<f32> {
         let r2 = self.radius * self.radius;
         let l = self.center - ray_origin;
         let tca = l.dot(ray_direction);
@@ -87,18 +88,18 @@ fn generate_camera_rays(
 fn main() {
     let scene = [
         Sphere {
-            center: Vector3::new(0., 0., 0.),
+            center: Point3::new(0., 0., 0.),
             radius: 5.,
             color: Vector3::new(0.8, 0.8, 0.8),
         },
         Sphere {
-            center: Vector3::new(5., 0., 0.),
+            center: Point3::new(5., 0., 0.),
             radius: 3.,
             color: Vector3::new(0.1, 0.8, 0.1),
         },
     ];
-    let cam_pos = Vector3::new(0., 0., -20.);
-    let light_pos = Vector3::new(10., 10., -20.);
+    let cam_pos = Point3::new(0., 0., -20.);
+    let light_pos = Point3::new(10., 10., -20.);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
