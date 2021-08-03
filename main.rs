@@ -1,7 +1,9 @@
 extern crate image;
 extern crate nalgebra as na;
+extern crate rayon;
 
 use std::time::Instant;
+use rayon::prelude::*;
 
 type Vector2 = na::Vector2<f32>;
 type Vector3 = na::Vector3<f32>;
@@ -107,10 +109,11 @@ fn main() {
     let camera_rays = generate_camera_rays(image_width, image_height, 90.);
 
     let time_start = Instant::now();
-
+    
+    let mut pixels = Vec::<(u32, u32, image::Rgb<u8>)>::new();
     let frames = 50;
     for _ in 0..frames {
-        for (x, y, rays) in &camera_rays {
+        camera_rays.par_iter().map(|(x, y, rays)| {
             let mut color = Vector3::zeros();
             for r in rays {
                 let mut closest_hit: Option<(&Sphere, f32)> = None;
@@ -137,8 +140,15 @@ fn main() {
                 }
             }
 
-            image.put_pixel(*x, *y, color_vec_to_rgb(color));
+            //image.put_pixel(*x, *y, color_vec_to_rgb(color));
+            (*x, *y, color_vec_to_rgb(color))
+        }).collect_into_vec(&mut pixels);
+
+        for (x, y, color) in &pixels {
+            image.put_pixel(*x, *y, *color);
         }
+
+        pixels.clear();
     }
 
     let elapsed = time_start.elapsed();
