@@ -2,8 +2,8 @@ extern crate image;
 extern crate nalgebra as na;
 extern crate rayon;
 
-use std::time::Instant;
 use rayon::prelude::*;
+use std::time::Instant;
 
 type Vector2 = na::Vector2<f32>;
 type Vector3 = na::Vector3<f32>;
@@ -68,8 +68,8 @@ fn generate_camera_rays(
 
     let mut rays =
         Vec::<(u32, u32, Vec<UVector3>)>::with_capacity((image_width * image_height) as usize);
-    for x in 0..image_width {
-        for y in 0..image_height {
+    for y in 0..image_height {
+        for x in 0..image_width {
             let mut sp_rays = Vec::<UVector3>::with_capacity(subpixels.len());
 
             let px = Vector2::new(x as f32, (image_height - y) as f32);
@@ -108,17 +108,22 @@ fn main() {
 
     let camera_rays = generate_camera_rays(image_width, image_height, 90.);
 
+    let mut rt_jobs: Vec<_> = image
+        .pixels_mut()
+        .zip(camera_rays)
+        .map(|(pixel, (_, _, rays))| (pixel, rays))
+        .collect();
+
     let time_start = Instant::now();
-    
-    let mut pixels = Vec::<(u32, u32, image::Rgb<u8>)>::new();
+
     let frames = 50;
     for _ in 0..frames {
-        camera_rays.par_iter().map(|(x, y, rays)| {
+        rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
             let mut color = Vector3::zeros();
-            for r in rays {
+            for r in &*rays {
                 let mut closest_hit: Option<(&Sphere, f32)> = None;
                 for o in &scene {
-                    if let Some(hit) = o.intersect(&cam_pos, r) {
+                    if let Some(hit) = o.intersect(&cam_pos, &r) {
                         let closest = match closest_hit {
                             Some(c) => hit < c.1,
                             None => true,
@@ -140,15 +145,8 @@ fn main() {
                 }
             }
 
-            //image.put_pixel(*x, *y, color_vec_to_rgb(color));
-            (*x, *y, color_vec_to_rgb(color))
-        }).collect_into_vec(&mut pixels);
-
-        for (x, y, color) in &pixels {
-            image.put_pixel(*x, *y, *color);
-        }
-
-        pixels.clear();
+            **pixel = color_vec_to_rgb(color);
+        });
     }
 
     let elapsed = time_start.elapsed();
