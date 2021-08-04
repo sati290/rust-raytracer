@@ -106,12 +106,16 @@ fn main() {
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
 
-    let camera_rays = generate_camera_rays(image_width, image_height, 90.);
+    let mut camera_rays = generate_camera_rays(image_width, image_height, 90.);
+    camera_rays.sort_by_key(|(x, y, _)| (*x, *y));
 
     let mut rt_jobs: Vec<_> = image
-        .pixels_mut()
-        .zip(camera_rays)
-        .map(|(pixel, (_, _, rays))| (pixel, rays))
+        .enumerate_pixels_mut()
+        .map(|(x, y, pixel)| {
+            let result = camera_rays.binary_search_by_key(&(x, y), |(x, y, _)| (*x, *y));
+            let rays = camera_rays[result.unwrap()].2.clone();
+            (pixel, rays)
+        })
         .collect();
 
     let time_start = Instant::now();
