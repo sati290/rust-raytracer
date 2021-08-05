@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::time::Instant;
-use ultraviolet::{f32x4, Vec2, Vec3, Vec3x4};
-use wide::{CmpGt, CmpLt};
+use ultraviolet::{Vec2, Vec3, Vec3x4};
+use wide::{CmpGt, CmpLt, f32x4, u32x4, i32x4};
 
 struct Sphere {
     center: Vec3,
@@ -42,17 +42,21 @@ impl Sphere {
         let d2 = l.dot(l) - tca * tca;
 
         let sqrt_valid = d2.cmp_lt(r2);
-        let thc = (r2 - d2).sqrt();
-        let t0 = tca - thc;
-        let t1 = tca + thc;
+        if sqrt_valid.any() {
+            let thc = (r2 - d2).sqrt();
+            let t0 = tca - thc;
+            let t1 = tca + thc;
 
-        let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
-        let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
+            let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
+            let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
-        let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
-        let t = t0_valid.blend(t1, t);
+            let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+            let t = t0_valid.blend(t0, t);
 
-        t
+            t
+        } else {
+            f32x4::splat(f32::MAX)
+        }
     }
 }
 
@@ -64,7 +68,7 @@ fn generate_camera_rays(
     image_width: u32,
     image_height: u32,
     horiz_fog_deg: f32,
-) -> Vec<(u32, u32, Vec<Vec3>)> {
+) -> Vec<(u32, u32, Vec3x4)> {
     let subpixels = [
         Vec2::new(5. / 8., 1. / 8.),
         Vec2::new(1. / 8., 3. / 8.),
@@ -79,20 +83,20 @@ fn generate_camera_rays(
     );
 
     let mut rays =
-        Vec::<(u32, u32, Vec<Vec3>)>::with_capacity((image_width * image_height) as usize);
+        Vec::<(u32, u32, Vec3x4)>::with_capacity((image_width * image_height) as usize);
     for y in 0..image_height {
         for x in 0..image_width {
-            let mut sp_rays = Vec::<Vec3>::with_capacity(subpixels.len());
+            let mut sp_rays = [Vec3::zero(); 4];
 
             let px = Vec2::new(x as f32, (image_height - y) as f32);
             let px = px - Vec2::new(image_width as f32 / 2., image_height as f32 / 2.);
-            for sp in subpixels {
-                let px = (px + sp) * image_dims_recip;
+            for i in 0..4 {
+                let px = (px + subpixels[i]) * image_dims_recip;
                 let ray = Vec3::new(px.x, px.y, plane_dist).normalized();
-                sp_rays.push(ray);
+                sp_rays[i] = ray;
             }
 
-            rays.push((x, y, sp_rays));
+            rays.push((x, y, Vec3x4::from(sp_rays)));
         }
     }
 
@@ -133,53 +137,35 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 50;
+    let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let mut color = Vec3::zero();
-
-            let r = Vec3x4::from([
-                rays[0],
-                rays[1],
-                rays[2],
-                rays[3]
-            ]);
-
-            let mut closest_hit = f32x4::splat(f32::MAX);
-            let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
+            let mut closest_hit: [Option<(&Sphere, f32)>; 4] = [None; 4];
             for o in &scene {
-                let hit = o.intersectx4(&cam_posx4, &r);
-                let closest = hit.cmp_lt(closest_hit);
-                closest_hit = closest.blend(hit, closest_hit);
+                let hit: [f32; 4] = o.intersectx4(&cam_posx4, rays).into();
+
                 for i in 0..4 {
-                    if closest[i] > 0 {
-                        closest_obj[i] = Some(o);
+                    let closest = match closest_hit[i] {
+                        Some(c) => hit[i] < c.1,
+                        None => true,
+                    };
+
+                    if closest {
+                        closest_hit[i] = Some((o, hit[i]));
                     }
                 }
             }
 
-            for r in &*rays {
-                let mut closest_hit: Option<(&Sphere, f32)> = None;
-                for o in &scene {
-                    if let Some(hit) = o.intersect(&cam_pos, &r) {
-                        let closest = match closest_hit {
-                            Some(c) => hit < c.1,
-                            None => true,
-                        };
-
-                        if closest {
-                            closest_hit = Some((o, hit));
-                        }
-                    }
-                }
-
-                if let Some(hit) = closest_hit {
-                    let hit_pos = cam_pos + *r * hit.1;
+            let mut color = Vec3::zero();
+            for i in 0..4 {
+                if let Some(hit) = closest_hit[i] {
+                    let r: [Vec3; 4] = (*rays).into();
+                    let hit_pos = cam_pos + r[i] * hit.1;
                     let normal = (hit_pos - hit.0.center).normalized();
                     let light_dir = (light_pos - hit_pos).normalized();
                     let ndl = light_dir.dot(normal);
 
-                    color += hit.0.color * ndl / rays.len() as f32;
+                    color += hit.0.color * ndl / 4.;
                 }
             }
 
