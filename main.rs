@@ -1,10 +1,7 @@
-extern crate image;
-extern crate rayon;
-extern crate ultraviolet as uv;
-
 use rayon::prelude::*;
 use std::time::Instant;
-use uv::vec::{Vec2, Vec3};
+use ultraviolet::{f32x4, Vec2, Vec3, Vec3x4};
+use wide::{CmpGt, CmpLt};
 
 struct Sphere {
     center: Vec3,
@@ -36,6 +33,26 @@ impl Sphere {
                 None
             }
         }
+    }
+
+    fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
+        let r2 = self.radius * self.radius;
+        let l = Vec3x4::splat(self.center) - *ray_origin;
+        let tca = l.dot(*ray_direction);
+        let d2 = l.dot(l) - tca * tca;
+
+        let sqrt_valid = d2.cmp_lt(r2);
+        let thc = (r2 - d2).sqrt();
+        let t0 = tca - thc;
+        let t1 = tca + thc;
+
+        let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
+        let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
+
+        let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+        let t = t0_valid.blend(t1, t);
+
+        t
     }
 }
 
@@ -96,6 +113,7 @@ fn main() {
         },
     ];
     let cam_pos = Vec3::new(0., 0., -20.);
+    let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
     let image_width = 1920;
     let image_height = 1080;
@@ -119,6 +137,27 @@ fn main() {
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
             let mut color = Vec3::zero();
+
+            let r = Vec3x4::from([
+                rays[0],
+                rays[1],
+                rays[2],
+                rays[3]
+            ]);
+
+            let mut closest_hit = f32x4::splat(f32::MAX);
+            let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
+            for o in &scene {
+                let hit = o.intersectx4(&cam_posx4, &r);
+                let closest = hit.cmp_lt(closest_hit);
+                closest_hit = closest.blend(hit, closest_hit);
+                for i in 0..4 {
+                    if closest[i] > 0 {
+                        closest_obj[i] = Some(o);
+                    }
+                }
+            }
+
             for r in &*rays {
                 let mut closest_hit: Option<(&Sphere, f32)> = None;
                 for o in &scene {
