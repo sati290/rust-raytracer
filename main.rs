@@ -39,6 +39,30 @@ impl Sphere {
     }
 }
 
+struct Scene {
+    objects: Vec<Sphere>,
+}
+
+impl Scene {
+    fn trace(&self, origin: &Vec3, direction: &Vec3) -> Option<(&Sphere, f32)> {
+        let mut closest_hit: Option<(&Sphere, f32)> = None;
+        for o in &self.objects {
+            if let Some(hit) = o.intersect(origin, direction) {
+                let closest = match closest_hit {
+                    Some(c) => hit < c.1,
+                    None => true,
+                };
+
+                if closest {
+                    closest_hit = Some((o, hit));
+                }
+            }
+        }
+
+        closest_hit
+    }
+}
+
 fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
@@ -83,18 +107,20 @@ fn generate_camera_rays(
 }
 
 fn main() {
-    let scene = [
-        Sphere {
-            center: Vec3::new(0., 0., 0.),
-            radius: 5.,
-            color: Vec3::new(0.8, 0.8, 0.8),
-        },
-        Sphere {
-            center: Vec3::new(5., 0., 0.),
-            radius: 3.,
-            color: Vec3::new(0.1, 0.8, 0.1),
-        },
-    ];
+    let scene = Scene {
+        objects: vec![
+            Sphere {
+                center: Vec3::new(0., 0., 0.),
+                radius: 5.,
+                color: Vec3::new(0.8, 0.8, 0.8),
+            },
+            Sphere {
+                center: Vec3::new(5., 0., 0.),
+                radius: 3.,
+                color: Vec3::new(0.1, 0.8, 0.1),
+            },
+        ],
+    };
     let cam_pos = Vec3::new(0., 0., -20.);
     let light_pos = Vec3::new(10., 10., -20.);
     let image_width = 1920;
@@ -115,26 +141,12 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 50;
+    let frames = 100;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
             let mut color = Vec3::zero();
             for r in &*rays {
-                let mut closest_hit: Option<(&Sphere, f32)> = None;
-                for o in &scene {
-                    if let Some(hit) = o.intersect(&cam_pos, &r) {
-                        let closest = match closest_hit {
-                            Some(c) => hit < c.1,
-                            None => true,
-                        };
-
-                        if closest {
-                            closest_hit = Some((o, hit));
-                        }
-                    }
-                }
-
-                if let Some(hit) = closest_hit {
+                if let Some(hit) = scene.trace(&cam_pos, r) {
                     let hit_pos = cam_pos + *r * hit.1;
                     let normal = (hit_pos - hit.0.center).normalized();
                     let light_dir = (light_pos - hit_pos).normalized();
