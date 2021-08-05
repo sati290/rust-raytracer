@@ -140,32 +140,32 @@ fn main() {
     let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let mut closest_hit: [Option<(&Sphere, f32)>; 4] = [None; 4];
+            let mut closest_hit = f32x4::splat(f32::MAX);
+            let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
             for o in &scene {
-                let hit: [f32; 4] = o.intersectx4(&cam_posx4, rays).into();
+                let hit = o.intersectx4(&cam_posx4, rays);
+                let closest = hit.cmp_lt(closest_hit);
+                closest_hit = closest.blend(hit, closest_hit);
 
+                let closest: [f32; 4] = closest.into();
                 for i in 0..4 {
-                    let closest = match closest_hit[i] {
-                        Some(c) => hit[i] < c.1,
-                        None => true,
-                    };
-
-                    if closest {
-                        closest_hit[i] = Some((o, hit[i]));
+                    if closest[i] != 0. {
+                        closest_obj[i] = Some(o);
                     }
                 }
             }
 
             let mut color = Vec3::zero();
+            let closest_hit: [f32; 4] = closest_hit.into();
+            let r: [Vec3; 4] = (*rays).into();
             for i in 0..4 {
-                if let Some(hit) = closest_hit[i] {
-                    let r: [Vec3; 4] = (*rays).into();
-                    let hit_pos = cam_pos + r[i] * hit.1;
-                    let normal = (hit_pos - hit.0.center).normalized();
+                if let Some(o) = closest_obj[i] {
+                    let hit_pos = cam_pos + r[i] * closest_hit[i];
+                    let normal = (hit_pos - o.center).normalized();
                     let light_dir = (light_pos - hit_pos).normalized();
                     let ndl = light_dir.dot(normal);
 
-                    color += hit.0.color * ndl / 4.;
+                    color += o.color * ndl / 4.;
                 }
             }
 
