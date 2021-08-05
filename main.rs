@@ -1,28 +1,23 @@
 extern crate image;
-extern crate nalgebra as na;
 extern crate rayon;
+extern crate ultraviolet as uv;
 
 use rayon::prelude::*;
 use std::time::Instant;
-
-type Vector2 = na::Vector2<f32>;
-type Vector3 = na::Vector3<f32>;
-type UVector3 = na::Unit<Vector3>;
-type Point3 = na::Point3<f32>;
-type Matrix4 = na::Matrix4<f32>;
+use uv::vec::{Vec2, Vec3};
 
 struct Sphere {
-    center: Point3,
+    center: Vec3,
     radius: f32,
-    color: Vector3,
+    color: Vec3,
 }
 
 impl Sphere {
-    fn intersect(&self, ray_origin: &Point3, ray_direction: &UVector3) -> Option<f32> {
+    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
         let r2 = self.radius * self.radius;
-        let l = self.center - ray_origin;
-        let tca = l.dot(ray_direction);
-        let d2 = l.dot(&l) - tca * tca;
+        let l = self.center - *ray_origin;
+        let tca = l.dot(*ray_direction);
+        let d2 = l.dot(l) - tca * tca;
 
         if d2 > r2 {
             None
@@ -44,7 +39,7 @@ impl Sphere {
     }
 }
 
-fn color_vec_to_rgb(v: Vector3) -> image::Rgb<u8> {
+fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
 
@@ -52,31 +47,31 @@ fn generate_camera_rays(
     image_width: u32,
     image_height: u32,
     horiz_fog_deg: f32,
-) -> Vec<(u32, u32, Vec<UVector3>)> {
+) -> Vec<(u32, u32, Vec<Vec3>)> {
     let subpixels = [
-        Vector2::new(5. / 8., 1. / 8.),
-        Vector2::new(1. / 8., 3. / 8.),
-        Vector2::new(7. / 8., 5. / 8.),
-        Vector2::new(3. / 8., 7. / 8.),
+        Vec2::new(5. / 8., 1. / 8.),
+        Vec2::new(1. / 8., 3. / 8.),
+        Vec2::new(7. / 8., 5. / 8.),
+        Vec2::new(3. / 8., 7. / 8.),
     ];
 
     let plane_dist = (horiz_fog_deg.to_radians() / 2.).tan();
-    let image_dims_recip = Vector2::new(
+    let image_dims_recip = Vec2::new(
         1. / image_width as f32,
         1. / image_width /* width used here to handle aspect */ as f32,
     );
 
     let mut rays =
-        Vec::<(u32, u32, Vec<UVector3>)>::with_capacity((image_width * image_height) as usize);
+        Vec::<(u32, u32, Vec<Vec3>)>::with_capacity((image_width * image_height) as usize);
     for y in 0..image_height {
         for x in 0..image_width {
-            let mut sp_rays = Vec::<UVector3>::with_capacity(subpixels.len());
+            let mut sp_rays = Vec::<Vec3>::with_capacity(subpixels.len());
 
-            let px = Vector2::new(x as f32, (image_height - y) as f32);
-            let px = px - Vector2::new(image_width as f32 / 2., image_height as f32 / 2.);
+            let px = Vec2::new(x as f32, (image_height - y) as f32);
+            let px = px - Vec2::new(image_width as f32 / 2., image_height as f32 / 2.);
             for sp in subpixels {
-                let px = (px + sp).component_mul(&image_dims_recip);
-                let ray = UVector3::new_normalize(Vector3::new(px.x, px.y, plane_dist));
+                let px = (px + sp) * image_dims_recip;
+                let ray = Vec3::new(px.x, px.y, plane_dist).normalized();
                 sp_rays.push(ray);
             }
 
@@ -90,18 +85,18 @@ fn generate_camera_rays(
 fn main() {
     let scene = [
         Sphere {
-            center: Point3::new(0., 0., 0.),
+            center: Vec3::new(0., 0., 0.),
             radius: 5.,
-            color: Vector3::new(0.8, 0.8, 0.8),
+            color: Vec3::new(0.8, 0.8, 0.8),
         },
         Sphere {
-            center: Point3::new(5., 0., 0.),
+            center: Vec3::new(5., 0., 0.),
             radius: 3.,
-            color: Vector3::new(0.1, 0.8, 0.1),
+            color: Vec3::new(0.1, 0.8, 0.1),
         },
     ];
-    let cam_pos = Point3::new(0., 0., -20.);
-    let light_pos = Point3::new(10., 10., -20.);
+    let cam_pos = Vec3::new(0., 0., -20.);
+    let light_pos = Vec3::new(10., 10., -20.);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
@@ -123,7 +118,7 @@ fn main() {
     let frames = 50;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let mut color = Vector3::zeros();
+            let mut color = Vec3::zero();
             for r in &*rays {
                 let mut closest_hit: Option<(&Sphere, f32)> = None;
                 for o in &scene {
@@ -140,10 +135,10 @@ fn main() {
                 }
 
                 if let Some(hit) = closest_hit {
-                    let hit_pos = cam_pos + r.into_inner() * hit.1;
-                    let normal = UVector3::new_normalize(hit_pos - hit.0.center);
-                    let light_dir = UVector3::new_normalize(light_pos - hit_pos);
-                    let ndl = light_dir.dot(&normal);
+                    let hit_pos = cam_pos + *r * hit.1;
+                    let normal = (hit_pos - hit.0.center).normalized();
+                    let light_dir = (light_pos - hit_pos).normalized();
+                    let ndl = light_dir.dot(normal);
 
                     color += hit.0.color * ndl / rays.len() as f32;
                 }
