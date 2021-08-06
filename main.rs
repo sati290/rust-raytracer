@@ -155,13 +155,28 @@ fn main() {
                 }
             }
 
-            let mut centers: [Vec3; 4] = [Vec3::zero(); 4];
-            for i in 0..4 {
-                if let Some(o) = closest_obj[i] {
-                    centers[i] = o.center;
-                }
-            }
-            let centers = Vec3x4::from(centers);
+            let centers = Vec3x4::from([
+                if let Some(o) = closest_obj[0] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[1] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[2] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[3] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+            ]);
 
             let hit_pos = cam_posx4 + *rays * closest_hit;
             let light_dir = (light_posx4 - hit_pos).normalized();
