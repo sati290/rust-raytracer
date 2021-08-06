@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
-use wide::{CmpGt, CmpLt, f32x4, u32x4, i32x4};
+use wide::{f32x4, CmpGt, CmpLt};
 
 struct Sphere {
     center: Vec3,
@@ -82,8 +82,7 @@ fn generate_camera_rays(
         1. / image_width /* width used here to handle aspect */ as f32,
     );
 
-    let mut rays =
-        Vec::<(u32, u32, Vec3x4)>::with_capacity((image_width * image_height) as usize);
+    let mut rays = Vec::<(u32, u32, Vec3x4)>::with_capacity((image_width * image_height) as usize);
     for y in 0..image_height {
         for x in 0..image_width {
             let mut sp_rays = [Vec3::zero(); 4];
@@ -119,6 +118,7 @@ fn main() {
     let cam_pos = Vec3::new(0., 0., -20.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
+    let light_posx4 = Vec3x4::splat(light_pos);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
@@ -155,17 +155,23 @@ fn main() {
                 }
             }
 
-            let mut color = Vec3::zero();
-            let closest_hit: [f32; 4] = closest_hit.into();
-            let r: [Vec3; 4] = (*rays).into();
+            let mut centers: [Vec3; 4] = [Vec3::zero(); 4];
             for i in 0..4 {
                 if let Some(o) = closest_obj[i] {
-                    let hit_pos = cam_pos + r[i] * closest_hit[i];
-                    let normal = (hit_pos - o.center).normalized();
-                    let light_dir = (light_pos - hit_pos).normalized();
-                    let ndl = light_dir.dot(normal);
+                    centers[i] = o.center;
+                }
+            }
+            let centers = Vec3x4::from(centers);
 
-                    color += o.color * ndl / 4.;
+            let hit_pos = cam_posx4 + *rays * closest_hit;
+            let light_dir = (light_posx4 - hit_pos).normalized();
+            let normal = (hit_pos - centers).normalized();
+            let ndl = light_dir.dot(normal);
+            let ndl: [f32; 4] = ndl.into();
+            let mut color = Vec3::zero();
+            for i in 0..4 {
+                if let Some(o) = closest_obj[i] {
+                    color += o.color * ndl[i] / 4.;
                 }
             }
 
