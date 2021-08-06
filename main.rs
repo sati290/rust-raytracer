@@ -5,13 +5,25 @@ use wide::{f32x4, CmpGt, CmpLt};
 
 struct Sphere {
     center: Vec3,
+    centerx4: Vec3x4,
     radius: f32,
+    radius2: f32,
     color: Vec3,
 }
 
 impl Sphere {
+    fn new(center: Vec3, radius: f32, color: Vec3) -> Sphere {
+        Sphere {
+            center,
+            centerx4: Vec3x4::splat(center),
+            radius,
+            radius2: radius * radius,
+            color,
+        }
+    }
+
     fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
-        let r2 = self.radius * self.radius;
+        let r2 = self.radius2;
         let l = self.center - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
@@ -36,14 +48,13 @@ impl Sphere {
     }
 
     fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
-        let r2 = self.radius * self.radius;
-        let l = Vec3x4::splat(self.center) - *ray_origin;
+        let l = self.centerx4 - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
 
-        let sqrt_valid = d2.cmp_lt(r2);
+        let sqrt_valid = d2.cmp_lt(self.radius2);
         if sqrt_valid.any() {
-            let thc = (r2 - d2).sqrt();
+            let thc = (self.radius2 - d2).sqrt();
             let t0 = tca - thc;
             let t1 = tca + thc;
 
@@ -51,9 +62,8 @@ impl Sphere {
             let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
             let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
-            let t = t0_valid.blend(t0, t);
 
-            t
+            t0_valid.blend(t0, t)
         } else {
             f32x4::splat(f32::MAX)
         }
@@ -104,16 +114,8 @@ fn generate_camera_rays(
 
 fn main() {
     let scene = [
-        Sphere {
-            center: Vec3::new(0., 0., 0.),
-            radius: 5.,
-            color: Vec3::new(0.8, 0.8, 0.8),
-        },
-        Sphere {
-            center: Vec3::new(5., 0., 0.),
-            radius: 3.,
-            color: Vec3::new(0.1, 0.8, 0.1),
-        },
+        Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
+        Sphere::new(Vec3::new(5., 0., 0.), 3., Vec3::new(0.1, 0.8, 0.1)),
     ];
     let cam_pos = Vec3::new(0., 0., -20.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
@@ -130,7 +132,7 @@ fn main() {
         .enumerate_pixels_mut()
         .map(|(x, y, pixel)| {
             let result = camera_rays.binary_search_by_key(&(x, y), |(x, y, _)| (*x, *y));
-            let rays = camera_rays[result.unwrap()].2.clone();
+            let rays = camera_rays[result.unwrap()].2;
             (pixel, rays)
         })
         .collect();
