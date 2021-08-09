@@ -172,6 +172,10 @@ fn main() {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
             let (closest_hit, closest_obj) = scene.trace(&cam_posx4, rays);
 
+            if closest_hit.cmp_lt(f32::MAX).none() {
+                return;
+            }
+
             let centers = Vec3x4::from([
                 if let Some(o) = closest_obj[0] {
                     o.center
