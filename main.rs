@@ -47,7 +47,7 @@ impl Sphere {
         }
     }
 
-    fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
+    fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
         let l = self.centerx4 - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
@@ -56,14 +56,17 @@ impl Sphere {
         if sqrt_valid.any() {
             let thc = (self.radius2 - d2).sqrt();
             let t0 = tca - thc;
-            let t1 = tca + thc;
-
             let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
-            let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
-            let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+            if backface {
+                let t1 = tca + thc;
+                let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
-            t0_valid.blend(t0, t)
+                let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+                t0_valid.blend(t0, t)
+            } else {
+                t0_valid.blend(t0, f32x4::splat(f32::MAX))
+            }
         } else {
             f32x4::splat(f32::MAX)
         }
@@ -75,11 +78,11 @@ struct Scene {
 }
 
 impl Scene {
-    fn trace(&self, origin: &Vec3x4, direction: &Vec3x4) -> (f32x4, [Option<&Sphere>; 4]) {
+    fn tracex4(&self, origin: &Vec3x4, direction: &Vec3x4, backface: bool) -> (f32x4, [Option<&Sphere>; 4]) {
         let mut closest_hit = f32x4::splat(f32::MAX);
         let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
         for o in &self.objects {
-            let hit = o.intersectx4(origin, direction);
+            let hit = o.intersectx4(origin, direction, backface);
             let closest = hit.cmp_lt(closest_hit);
             closest_hit = closest.blend(hit, closest_hit);
 
@@ -141,7 +144,7 @@ fn main() {
     let scene = Scene {
         objects: vec![
             Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
-            Sphere::new(Vec3::new(5., 0., 0.), 3., Vec3::new(0.1, 0.8, 0.1)),
+            Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.1, 0.8, 0.1)),
         ],
     };
 
@@ -170,7 +173,7 @@ fn main() {
     let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let (closest_hit, closest_obj) = scene.trace(&cam_posx4, rays);
+            let (closest_hit, closest_obj) = scene.tracex4(&cam_posx4, rays, false);
 
             if closest_hit.cmp_lt(f32::MAX).none() {
                 return;
@@ -200,6 +203,16 @@ fn main() {
             ]);
 
             let hit_pos = cam_posx4 + *rays * closest_hit;
+
+            let shadow_ray = (light_posx4 - hit_pos).normalized();
+            let (shadow_hit, _) = scene.tracex4(&hit_pos, &shadow_ray, false);
+
+            if shadow_hit.cmp_lt(f32::MAX).all() {
+                return;
+            }
+
+            let shadow_hit: [f32; 4] = shadow_hit.into();
+
             let light_dir = (light_posx4 - hit_pos).normalized();
             let normal = (hit_pos - centers).normalized();
             let ndl = light_dir.dot(normal);
@@ -207,7 +220,9 @@ fn main() {
             let mut color = Vec3::zero();
             for i in 0..4 {
                 if let Some(o) = closest_obj[i] {
-                    color += o.color * ndl[i] / 4.;
+                    if !(shadow_hit[i] < f32::MAX) {
+                        color += o.color * ndl[i] / 4.;
+                    }
                 }
             }
 
