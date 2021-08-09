@@ -86,9 +86,9 @@ impl Scene {
             let closest = hit.cmp_lt(closest_hit);
             closest_hit = closest.blend(hit, closest_hit);
 
-            let closest: [f32; 4] = closest.into();
+            let closest_mask = closest.move_mask();
             for i in 0..4 {
-                if closest[i] != 0. {
+                if closest_mask & 1<<i != 0 {
                     closest_obj[i] = Some(o);
                 }
             }
