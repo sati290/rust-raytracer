@@ -70,6 +70,31 @@ impl Sphere {
     }
 }
 
+struct Scene {
+    objects: Vec<Sphere>,
+}
+
+impl Scene {
+    fn trace(&self, origin: &Vec3x4, direction: &Vec3x4) -> (f32x4, [Option<&Sphere>; 4]) {
+        let mut closest_hit = f32x4::splat(f32::MAX);
+        let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
+        for o in &self.objects {
+            let hit = o.intersectx4(origin, direction);
+            let closest = hit.cmp_lt(closest_hit);
+            closest_hit = closest.blend(hit, closest_hit);
+
+            let closest: [f32; 4] = closest.into();
+            for i in 0..4 {
+                if closest[i] != 0. {
+                    closest_obj[i] = Some(o);
+                }
+            }
+        }
+
+        (closest_hit, closest_obj)
+    }
+}
+
 fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
@@ -113,10 +138,13 @@ fn generate_camera_rays(
 }
 
 fn main() {
-    let scene = [
-        Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
-        Sphere::new(Vec3::new(5., 0., 0.), 3., Vec3::new(0.1, 0.8, 0.1)),
-    ];
+    let scene = Scene {
+        objects: vec![
+            Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
+            Sphere::new(Vec3::new(5., 0., 0.), 3., Vec3::new(0.1, 0.8, 0.1)),
+        ],
+    };
+
     let cam_pos = Vec3::new(0., 0., -20.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
@@ -142,20 +170,7 @@ fn main() {
     let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let mut closest_hit = f32x4::splat(f32::MAX);
-            let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
-            for o in &scene {
-                let hit = o.intersectx4(&cam_posx4, rays);
-                let closest = hit.cmp_lt(closest_hit);
-                closest_hit = closest.blend(hit, closest_hit);
-
-                let closest: [f32; 4] = closest.into();
-                for i in 0..4 {
-                    if closest[i] != 0. {
-                        closest_obj[i] = Some(o);
-                    }
-                }
-            }
+            let (closest_hit, closest_obj) = scene.trace(&cam_posx4, rays);
 
             let centers = Vec3x4::from([
                 if let Some(o) = closest_obj[0] {
