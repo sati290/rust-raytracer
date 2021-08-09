@@ -144,7 +144,7 @@ fn main() {
     let scene = Scene {
         objects: vec![
             Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
-            Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.1, 0.8, 0.1)),
+            Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.8, 0.1, 0.1)),
         ],
     };
 
