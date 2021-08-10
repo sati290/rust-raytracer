@@ -1,3 +1,5 @@
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
@@ -78,7 +80,12 @@ struct Scene {
 }
 
 impl Scene {
-    fn tracex4(&self, origin: &Vec3x4, direction: &Vec3x4, backface: bool) -> (f32x4, [Option<&Sphere>; 4]) {
+    fn tracex4(
+        &self,
+        origin: &Vec3x4,
+        direction: &Vec3x4,
+        backface: bool,
+    ) -> (f32x4, [Option<&Sphere>; 4]) {
         let mut closest_hit = f32x4::splat(f32::MAX);
         let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
         for o in &self.objects {
@@ -88,7 +95,7 @@ impl Scene {
 
             let closest_mask = closest.move_mask();
             for i in 0..4 {
-                if closest_mask & 1<<i != 0 {
+                if closest_mask & 1 << i != 0 {
                     closest_obj[i] = Some(o);
                 }
             }
@@ -140,15 +147,44 @@ fn generate_camera_rays(
     rays
 }
 
+fn generate_random_scene() -> Scene {
+    let mut rng = StdRng::seed_from_u64(646524362);
+    let mut scene = Scene {
+        objects: Vec::new(),
+    };
+    for _ in 0..20 {
+        scene.objects.push(Sphere::new(
+            Vec3::new(
+                rng.gen_range(-10.0..10.0),
+                rng.gen_range(-10.0..10.0),
+                rng.gen_range(-10.0..10.0),
+            ),
+            rng.gen_range(0.5..2.0),
+            Vec3::new(
+                rng.gen_range(0.0..1.0),
+                rng.gen_range(0.0..1.0),
+                rng.gen_range(0.0..1.0),
+            ),
+        ));
+    }
+
+    scene
+}
+
 fn main() {
-    let scene = Scene {
-        objects: vec![
-            Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
-            Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.8, 0.1, 0.1)),
-        ],
+    let random_scene = true;
+    let scene = if random_scene {
+        generate_random_scene()
+    } else {
+        Scene {
+            objects: vec![
+                Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
+                Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.8, 0.1, 0.1)),
+            ],
+        }
     };
 
-    let cam_pos = Vec3::new(0., 0., -20.);
+    let cam_pos = Vec3::new(0., 0., -30.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
     let light_posx4 = Vec3x4::splat(light_pos);
