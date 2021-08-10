@@ -94,9 +94,9 @@ impl Scene {
             closest_hit = closest.blend(hit, closest_hit);
 
             let closest_mask = closest.move_mask();
-            for i in 0..4 {
+            for (i, obj) in closest_obj.iter_mut().enumerate() {
                 if closest_mask & 1 << i != 0 {
-                    closest_obj[i] = Some(o);
+                    *obj = Some(o);
                 }
             }
         }
@@ -256,7 +256,7 @@ fn main() {
             let mut color = Vec3::zero();
             for i in 0..4 {
                 if let Some(o) = closest_obj[i] {
-                    if !(shadow_hit[i] < f32::MAX) {
+                    if shadow_hit[i] >= f32::MAX {
                         color += o.color * ndl[i] / 4.;
                     }
                 }
