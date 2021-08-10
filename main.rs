@@ -1,3 +1,8 @@
+mod aabb;
+mod bvh;
+
+use aabb::Aabb;
+use bvh::Bvh;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -5,7 +10,7 @@ use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
 use wide::{f32x4, CmpGt, CmpLt};
 
-struct Sphere {
+pub struct Sphere {
     center: Vec3,
     centerx4: Vec3x4,
     radius: f32,
@@ -21,6 +26,14 @@ impl Sphere {
             radius,
             radius2: radius * radius,
             color,
+        }
+    }
+
+    fn aabb(&self) -> Aabb {
+        let r = Vec3::broadcast(self.radius);
+        Aabb {
+            min: self.center - r,
+            max: self.center + r,
         }
     }
 
@@ -183,6 +196,10 @@ fn main() {
             ],
         }
     };
+
+    let bvh_start = Instant::now();
+    let _bvh = Bvh::build(&scene.objects);
+    println!("bvh build {:.2?}", bvh_start.elapsed());
 
     let cam_pos = Vec3::new(0., 0., -30.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
