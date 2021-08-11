@@ -13,7 +13,8 @@
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
-            "console": "internalConsole"
+            "console": "internalConsole",
+            "preLaunchTask": "${defaultBuildTask}"
         }
     ]
 }

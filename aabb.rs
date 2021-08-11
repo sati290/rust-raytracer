@@ -44,4 +44,26 @@ impl Aabb {
         self.min = self.min.min_by_component(other.min);
         self.max = self.max.max_by_component(other.max);
     }
+
+    pub fn intersect(&self, ray_origin: &Vec3, ray_direction_recip: &Vec3) -> bool {
+        let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
+        let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
+
+        let tmin = tx1.min(tx2);
+        let tmax = tx1.max(tx2);
+
+        let ty1 = (self.min.y - ray_origin.y) * ray_direction_recip.y;
+        let ty2 = (self.max.y - ray_origin.y) * ray_direction_recip.y;
+
+        let tmin = tmin.max(ty1.min(ty2));
+        let tmax = tmax.min(ty1.max(ty2));
+
+        let tz1 = (self.min.z - ray_origin.z) * ray_direction_recip.z;
+        let tz2 = (self.max.z - ray_origin.z) * ray_direction_recip.z;
+
+        let tmin = tmin.max(tz1.min(tz2));
+        let tmax = tmax.min(tz1.max(tz2));
+
+        tmax >= tmin.max(0.)
+    }
 }

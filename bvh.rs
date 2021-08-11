@@ -2,6 +2,7 @@ use crate::aabb::Aabb;
 use crate::Sphere;
 use std::cmp::Ordering;
 use std::ops::Range;
+use ultraviolet::Vec3;
 
 enum BvhNode<'a> {
     Inner {
@@ -11,6 +12,43 @@ enum BvhNode<'a> {
     Leaf {
         object: &'a Sphere,
     },
+}
+
+impl BvhNode<'_> {
+    fn trace(
+        &self,
+        ray_origin: &Vec3,
+        ray_direction: &Vec3,
+        ray_direction_recip: &Vec3,
+    ) -> (f32, Option<&Sphere>) {
+        match self {
+            BvhNode::Inner {
+                child_bbox,
+                children,
+            } => {
+                let tl = if child_bbox[0].intersect(ray_origin, ray_direction_recip) {
+                    children[0].trace(ray_origin, ray_direction, ray_direction_recip)
+                } else {
+                    (f32::MAX, None)
+                };
+                let tr = if child_bbox[1].intersect(ray_origin, ray_direction_recip) {
+                    children[1].trace(ray_origin, ray_direction, ray_direction_recip)
+                } else {
+                    (f32::MAX, None)
+                };
+
+                if tl.0 < tr.0 {
+                    tl
+                } else {
+                    tr
+                }
+            }
+            BvhNode::Leaf { object } => match object.intersect(ray_origin, ray_direction, false) {
+                Some(x) => (x, Some(object)),
+                None => (f32::MAX, None),
+            },
+        }
+    }
 }
 
 pub struct Bvh<'a> {
@@ -74,5 +112,11 @@ impl Bvh<'_> {
                 object: objects.first().unwrap(),
             }
         }
+    }
+
+    pub fn trace(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> (f32, Option<&Sphere>) {
+        let ray_direction_recip = Vec3::broadcast(1.) / *ray_direction;
+        self.root_node
+            .trace(ray_origin, ray_direction, &ray_direction_recip)
     }
 }
