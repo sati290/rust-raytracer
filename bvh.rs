@@ -3,19 +3,19 @@ use crate::Sphere;
 use std::cmp::Ordering;
 use std::ops::Range;
 
-enum BvhNode {
+enum BvhNode<'a> {
     Inner {
         child_bbox: [Aabb; 2],
-        children: [Box<BvhNode>; 2],
+        children: [Box<BvhNode<'a>>; 2],
     },
     Leaf {
-        objects: Range<usize>,
+        object: &'a Sphere,
     },
 }
 
 pub struct Bvh<'a> {
     objects: Vec<&'a Sphere>,
-    root_node: BvhNode,
+    root_node: BvhNode<'a>,
 }
 
 impl Bvh<'_> {
@@ -26,7 +26,7 @@ impl Bvh<'_> {
         Bvh { objects, root_node }
     }
 
-    fn build_recursive(objects: &mut [&Sphere]) -> BvhNode {
+    fn build_recursive<'a>(objects: &mut [&'a Sphere]) -> BvhNode<'a> {
         let mut bounds = Aabb::empty();
         let mut centroid_bounds = Aabb::empty();
         for o in &*objects {
@@ -52,12 +52,27 @@ impl Bvh<'_> {
 
             let (objects_left, objects_right) = objects.split_at_mut(objects.len() / 2);
 
+            let mut bbox_left = Aabb::empty();
+            for o in &*objects_left {
+                bbox_left.join_mut(o.aabb());
+            }
+
+            let mut bbox_right = Aabb::empty();
+            for o in &*objects_right {
+                bbox_right.join_mut(o.aabb());
+            }
+
             let child_left = Bvh::build_recursive(objects_left);
             let child_right = Bvh::build_recursive(objects_right);
 
-            BvhNode::Leaf { objects: 0..0 }
+            BvhNode::Inner {
+                child_bbox: [bbox_left, bbox_right],
+                children: [Box::new(child_left), Box::new(child_right)],
+            }
         } else {
-            BvhNode::Leaf { objects: 0..0 }
+            BvhNode::Leaf {
+                object: objects.first().unwrap(),
+            }
         }
     }
 }
