@@ -37,7 +37,7 @@ impl Sphere {
         }
     }
 
-    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
+    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3, backface: bool) -> Option<f32> {
         let r2 = self.radius2;
         let l = self.center - *ray_origin;
         let tca = l.dot(*ray_direction);
@@ -50,11 +50,9 @@ impl Sphere {
             let t0 = tca - thc;
             let t1 = tca + thc;
 
-            assert!(t0 <= t1);
-
             if t0 > 0. {
                 Some(t0)
-            } else if t1 > 0. {
+            } else if backface && t1 > 0. {
                 Some(t1)
             } else {
                 None
