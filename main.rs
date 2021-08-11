@@ -8,7 +8,7 @@ use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
-use wide::{f32x4, CmpGt, CmpLt};
+use wide::{f32x4, CmpGe, CmpGt, CmpLt};
 
 pub struct Sphere {
     center: Vec3,
@@ -60,7 +60,7 @@ impl Sphere {
         }
     }
 
-    fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
+    fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
         let l = self.centerx4 - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
