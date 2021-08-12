@@ -10,6 +10,32 @@ use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
 use wide::{f32x4, CmpGe, CmpGt, CmpLt};
 
+pub struct TraceResultSimd<'a> {
+    hit_dist: f32x4,
+    object: [Option<&'a Sphere>; 4],
+}
+
+impl<'a> TraceResultSimd<'a> {
+    fn new<'b>() -> TraceResultSimd<'b> {
+        TraceResultSimd {
+            hit_dist: f32x4::splat(f32::MAX),
+            object: [None; 4],
+        }
+    }
+
+    fn add_hit(&mut self, hit_dist: f32x4, object: &'a Sphere) {
+        let closest = hit_dist.cmp_lt(self.hit_dist);
+        self.hit_dist = closest.blend(hit_dist, self.hit_dist);
+
+        let closest_mask = closest.move_mask();
+        for (i, obj) in self.object.iter_mut().enumerate() {
+            if closest_mask & 1 << i != 0 {
+                *obj = Some(object);
+            }
+        }
+    }
+}
+
 pub struct Sphere {
     center: Vec3,
     centerx4: Vec3x4,
@@ -91,28 +117,14 @@ struct Scene {
 }
 
 impl Scene {
-    fn tracex4(
-        &self,
-        origin: &Vec3x4,
-        direction: &Vec3x4,
-        backface: bool,
-    ) -> (f32x4, [Option<&Sphere>; 4]) {
-        let mut closest_hit = f32x4::splat(f32::MAX);
-        let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
+    fn trace_simd(&self, origin: &Vec3x4, direction: &Vec3x4, backface: bool) -> TraceResultSimd {
+        let mut result = TraceResultSimd::new();
         for o in &self.objects {
-            let hit = o.intersectx4(origin, direction, backface);
-            let closest = hit.cmp_lt(closest_hit);
-            closest_hit = closest.blend(hit, closest_hit);
-
-            let closest_mask = closest.move_mask();
-            for (i, obj) in closest_obj.iter_mut().enumerate() {
-                if closest_mask & 1 << i != 0 {
-                    *obj = Some(o);
-                }
-            }
+            let hit = o.intersect_simd(origin, direction, backface);
+            result.add_hit(hit, o);
         }
 
-        (closest_hit, closest_obj)
+        result
     }
 }
 
@@ -124,7 +136,7 @@ fn generate_camera_rays(
     image_width: u32,
     image_height: u32,
     horiz_fog_deg: f32,
-) -> Vec<(u32, u32, [Vec3; 4])> {
+) -> Vec<(u32, u32, Vec3x4)> {
     let subpixels = [
         Vec2::new(5. / 8., 1. / 8.),
         Vec2::new(1. / 8., 3. / 8.),
@@ -138,8 +150,7 @@ fn generate_camera_rays(
         1. / image_width /* width used here to handle aspect */ as f32,
     );
 
-    let mut rays =
-        Vec::<(u32, u32, [Vec3; 4])>::with_capacity((image_width * image_height) as usize);
+    let mut rays = Vec::<(u32, u32, Vec3x4)>::with_capacity((image_width * image_height) as usize);
     for y in 0..image_height {
         for x in 0..image_width {
             let mut sp_rays = [Vec3::zero(); 4];
@@ -152,7 +163,7 @@ fn generate_camera_rays(
                 sp_rays[i] = ray;
             }
 
-            rays.push((x, y, sp_rays));
+            rays.push((x, y, Vec3x4::from(sp_rays)));
         }
     }
 
@@ -222,74 +233,76 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 100;
+    let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let mut color = Vec3::zero();
-            for r in rays {
-                let (hit, hit_obj) = bvh.trace(&cam_pos, r);
+            let use_bvh = true;
+            let TraceResultSimd {
+                hit_dist: closest_hit,
+                object: closest_obj,
+            } = if use_bvh {
+                bvh.trace(&cam_posx4, rays)
+            } else {
+                scene.trace_simd(&cam_posx4, rays, false)
+            };
 
-                if let Some(obj) = hit_obj {
-                    let hit_pos = cam_pos + *r * hit;
-                    let light_dir = (light_pos - hit_pos).normalized();
-                    let normal = (hit_pos - obj.center).normalized();
-                    let ndl = light_dir.dot(normal);
-                    color += obj.color * ndl / 4.;
-                }
+            if closest_hit.cmp_lt(f32::MAX).none() {
+                return;
             }
 
-            // let (closest_hit, closest_obj) = scene.tracex4(&cam_posx4, rays, false);
+            let centers = Vec3x4::from([
+                if let Some(o) = closest_obj[0] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[1] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[2] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+                if let Some(o) = closest_obj[3] {
+                    o.center
+                } else {
+                    Vec3::zero()
+                },
+            ]);
 
-            // if closest_hit.cmp_lt(f32::MAX).none() {
-            //     return;
-            // }
+            let hit_pos = cam_posx4 + *rays * closest_hit;
 
-            // let centers = Vec3x4::from([
-            //     if let Some(o) = closest_obj[0] {
-            //         o.center
-            //     } else {
-            //         Vec3::zero()
-            //     },
-            //     if let Some(o) = closest_obj[1] {
-            //         o.center
-            //     } else {
-            //         Vec3::zero()
-            //     },
-            //     if let Some(o) = closest_obj[2] {
-            //         o.center
-            //     } else {
-            //         Vec3::zero()
-            //     },
-            //     if let Some(o) = closest_obj[3] {
-            //         o.center
-            //     } else {
-            //         Vec3::zero()
-            //     },
-            // ]);
+            let shadow_ray = (light_posx4 - hit_pos).normalized();
+            let TraceResultSimd {
+                hit_dist: shadow_hit,
+                ..
+            } = if use_bvh {
+                bvh.trace(&hit_pos, &shadow_ray)
+            } else {
+                scene.trace_simd(&hit_pos, &shadow_ray, false)
+            };
 
-            // let hit_pos = cam_posx4 + *rays * closest_hit;
+            if shadow_hit.cmp_lt(f32::MAX).all() {
+                return;
+            }
 
-            // let shadow_ray = (light_posx4 - hit_pos).normalized();
-            // let (shadow_hit, _) = scene.tracex4(&hit_pos, &shadow_ray, false);
+            let shadow_hit: [f32; 4] = shadow_hit.into();
 
-            // if shadow_hit.cmp_lt(f32::MAX).all() {
-            //     return;
-            // }
-
-            // let shadow_hit: [f32; 4] = shadow_hit.into();
-
-            // let light_dir = (light_posx4 - hit_pos).normalized();
-            // let normal = (hit_pos - centers).normalized();
-            // let ndl = light_dir.dot(normal);
-            // let ndl: [f32; 4] = ndl.into();
-            // let mut color = Vec3::zero();
-            // for i in 0..4 {
-            //     if let Some(o) = closest_obj[i] {
-            //         if shadow_hit[i] >= f32::MAX {
-            //             color += o.color * ndl[i] / 4.;
-            //         }
-            //     }
-            // }
+            let light_dir = (light_posx4 - hit_pos).normalized();
+            let normal = (hit_pos - centers).normalized();
+            let ndl = light_dir.dot(normal);
+            let ndl: [f32; 4] = ndl.into();
+            let mut color = Vec3::zero();
+            for i in 0..4 {
+                if let Some(o) = closest_obj[i] {
+                    if shadow_hit[i] >= f32::MAX {
+                        color += o.color * ndl[i] / 4.;
+                    }
+                }
+            }
 
             **pixel = color_vec_to_rgb(color);
         });

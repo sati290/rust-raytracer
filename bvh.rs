@@ -1,10 +1,9 @@
 use crate::aabb::Aabb;
-use crate::f32x4;
 use crate::Sphere;
+use crate::TraceResultSimd;
 use crate::Vec3;
 use crate::Vec3x4;
 use std::cmp::Ordering;
-use std::ops::Range;
 
 enum BvhNode<'a> {
     Inner {
@@ -16,46 +15,35 @@ enum BvhNode<'a> {
     },
 }
 
-impl BvhNode<'_> {
+impl<'a> BvhNode<'a> {
     fn trace(
         &self,
         ray_origin: &Vec3x4,
         ray_direction: &Vec3x4,
         ray_direction_recip: &Vec3x4,
-    ) -> (f32x4, [Option<&Sphere>; 4]) {
+        result: &mut TraceResultSimd<'a>,
+    ) {
         match self {
             BvhNode::Inner {
                 child_bbox,
                 children,
             } => {
-                let tl = if child_bbox[0]
+                if child_bbox[0]
                     .intersect_simd(ray_origin, ray_direction_recip)
                     .any()
                 {
-                    children[0].trace(ray_origin, ray_direction, ray_direction_recip)
-                } else {
-                    (f32x4::splat(f32::MAX), [None; 4])
+                    children[0].trace(ray_origin, ray_direction, ray_direction_recip, result)
                 };
-                let tr = if child_bbox[1]
+                if child_bbox[1]
                     .intersect_simd(ray_origin, ray_direction_recip)
                     .any()
                 {
-                    children[1].trace(ray_origin, ray_direction, ray_direction_recip)
-                } else {
-                    (f32x4::splat(f32::MAX), [None; 4])
+                    children[1].trace(ray_origin, ray_direction, ray_direction_recip, result)
                 };
-
-                if tl.0 < tr.0 {
-                    tl
-                } else {
-                    tr
-                }
             }
             BvhNode::Leaf { object } => {
-                match object.intersect_simd(ray_origin, ray_direction, false) {
-                    Some(x) => (x, Some(object)),
-                    None => (f32::MAX, None),
-                }
+                let hit = object.intersect_simd(ray_origin, ray_direction, false);
+                result.add_hit(hit, object);
             }
         }
     }
@@ -124,13 +112,12 @@ impl Bvh<'_> {
         }
     }
 
-    pub fn trace(
-        &self,
-        ray_origin: &Vec3x4,
-        ray_direction: &Vec3x4,
-    ) -> (f32x4, [Option<&Sphere>; 4]) {
+    pub fn trace(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
         let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
+        let mut result = TraceResultSimd::new();
         self.root_node
-            .trace(ray_origin, ray_direction, &ray_direction_recip)
+            .trace(ray_origin, ray_direction, &ray_direction_recip, &mut result);
+
+        result
     }
 }
