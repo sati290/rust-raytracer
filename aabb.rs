@@ -3,9 +3,16 @@ use crate::CmpGe;
 use crate::Vec3;
 use crate::Vec3x4;
 
+#[derive(Clone, Copy)]
 pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
+}
+
+impl Default for Aabb {
+    fn default() -> Self {
+        Aabb::empty()
+    }
 }
 
 impl Aabb {
@@ -20,6 +27,12 @@ impl Aabb {
     #[must_use]
     pub fn size(&self) -> Vec3 {
         self.max - self.min
+    }
+
+    #[must_use]
+    pub fn surface_area(&self) -> f32 {
+        let size = self.size();
+        2. * (size.x * size.y + size.x * size.z + size.y * size.z)
     }
 
     #[must_use]

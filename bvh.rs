@@ -3,7 +3,6 @@ use crate::Sphere;
 use crate::TraceResultSimd;
 use crate::Vec3;
 use crate::Vec3x4;
-use std::cmp::Ordering;
 
 enum BvhNode<'a> {
     Inner {
@@ -63,14 +62,14 @@ impl Bvh<'_> {
     }
 
     fn build_recursive<'a>(objects: &mut [&'a Sphere]) -> BvhNode<'a> {
-        let mut bounds = Aabb::empty();
-        let mut centroid_bounds = Aabb::empty();
-        for o in &*objects {
-            bounds.join_mut(o.aabb());
-            centroid_bounds.grow_mut(o.center);
-        }
-
         if objects.len() > 1 {
+            let mut bounds = Aabb::empty();
+            let mut centroid_bounds = Aabb::empty();
+            for o in &*objects {
+                bounds.join_mut(o.aabb());
+                centroid_bounds.grow_mut(o.center);
+            }
+
             let size = bounds.size();
             let largest_axis = if size.x > size.y && size.x > size.z {
                 0
@@ -80,29 +79,54 @@ impl Bvh<'_> {
                 2
             };
 
-            objects.sort_by(|a, b| {
-                a.center[largest_axis]
-                    .partial_cmp(&b.center[largest_axis])
-                    .unwrap_or(Ordering::Equal)
-            });
+            const BUCKET_COUNT: usize = 8;
+            let mut buckets = [(Aabb::empty(), 0u32); BUCKET_COUNT];
 
-            let (objects_left, objects_right) = objects.split_at_mut(objects.len() / 2);
+            let k0 = centroid_bounds.min[largest_axis];
+            let k1 = BUCKET_COUNT as f32 * (1. - 0.01)
+                / (centroid_bounds.max[largest_axis] - centroid_bounds.min[largest_axis]);
+            let get_bucket_idx = |obj: &Sphere| (k1 * (obj.center[largest_axis] - k0)) as usize;
+            for o in &*objects {
+                let bucket_idx = get_bucket_idx(o);
+                let bucket = &mut buckets[bucket_idx];
 
-            let mut bbox_left = Aabb::empty();
-            for o in &*objects_left {
-                bbox_left.join_mut(o.aabb());
+                bucket.0.join_mut(o.aabb());
+                bucket.1 += 1;
             }
 
-            let mut bbox_right = Aabb::empty();
-            for o in &*objects_right {
-                bbox_right.join_mut(o.aabb());
+            let mut min_bucket = 0;
+            let mut min_cost = f32::INFINITY;
+            let mut bounds_l = Aabb::empty();
+            let mut bounds_r = Aabb::empty();
+            for i in 0..(BUCKET_COUNT - 1) {
+                let (buckets_l, buckets_r) = buckets.split_at(i + 1);
+                let child_l = buckets_l.iter().fold((Aabb::empty(), 0u32), |acc, x| {
+                    (acc.0.join(x.0), acc.1 + x.1)
+                });
+                let child_r = buckets_r.iter().fold((Aabb::empty(), 0u32), |acc, x| {
+                    (acc.0.join(x.0), acc.1 + x.1)
+                });
+
+                let cost = (child_l.0.surface_area() * child_l.1 as f32
+                    + child_r.0.surface_area() * child_r.1 as f32)
+                    / bounds.surface_area();
+                if cost < min_cost {
+                    min_bucket = i;
+                    min_cost = cost;
+                    bounds_l = child_l.0;
+                    bounds_r = child_r.0;
+                }
             }
+
+            objects.sort_by(|a, b| get_bucket_idx(a).cmp(&get_bucket_idx(b)));
+            let split_idx = objects.partition_point(|o| get_bucket_idx(o) <= min_bucket);
+            let (objects_left, objects_right) = objects.split_at_mut(split_idx);
 
             let child_left = Bvh::build_recursive(objects_left);
             let child_right = Bvh::build_recursive(objects_right);
 
             BvhNode::Inner {
-                child_bbox: [bbox_left, bbox_right],
+                child_bbox: [bounds_l, bounds_r],
                 children: [Box::new(child_left), Box::new(child_right)],
             }
         } else {
