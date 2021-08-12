@@ -61,6 +61,7 @@ impl Aabb {
         self.max = self.max.max_by_component(other.max);
     }
 
+    #[must_use]
     pub fn intersect(&self, ray_origin: &Vec3, ray_direction_recip: &Vec3) -> bool {
         let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
         let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
@@ -82,8 +83,25 @@ impl Aabb {
 
         tmax >= tmin.max(0.)
     }
+}
 
-    pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
+pub struct AabbSimd {
+    pub min: Vec3x4,
+    pub max: Vec3x4,
+}
+
+impl From<Aabb> for AabbSimd {
+    fn from(other: Aabb) -> Self {
+        AabbSimd {
+            min: Vec3x4::splat(other.min),
+            max: Vec3x4::splat(other.max),
+        }
+    }
+}
+
+impl AabbSimd {
+    #[must_use]
+    pub fn intersect(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
         let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
         let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
 

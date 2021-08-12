@@ -1,4 +1,4 @@
-use crate::aabb::Aabb;
+use crate::aabb::{Aabb, AabbSimd};
 use crate::Sphere;
 use crate::TraceResultSimd;
 use crate::Vec3;
@@ -6,7 +6,7 @@ use crate::Vec3x4;
 
 enum BvhNode<'a> {
     Inner {
-        child_bbox: [Aabb; 2],
+        child_bbox: [AabbSimd; 2],
         children: [Box<BvhNode<'a>>; 2],
     },
     Leaf {
@@ -28,13 +28,13 @@ impl<'a> BvhNode<'a> {
                 children,
             } => {
                 if child_bbox[0]
-                    .intersect_simd(ray_origin, ray_direction_recip)
+                    .intersect(ray_origin, ray_direction_recip)
                     .any()
                 {
                     children[0].trace(ray_origin, ray_direction, ray_direction_recip, result)
                 };
                 if child_bbox[1]
-                    .intersect_simd(ray_origin, ray_direction_recip)
+                    .intersect(ray_origin, ray_direction_recip)
                     .any()
                 {
                     children[1].trace(ray_origin, ray_direction, ray_direction_recip, result)
@@ -126,7 +126,7 @@ impl Bvh<'_> {
             let child_right = Bvh::build_recursive(objects_right);
 
             BvhNode::Inner {
-                child_bbox: [bounds_l, bounds_r],
+                child_bbox: [AabbSimd::from(bounds_l), AabbSimd::from(bounds_r)],
                 children: [Box::new(child_left), Box::new(child_right)],
             }
         } else {
