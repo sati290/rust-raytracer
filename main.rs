@@ -18,7 +18,7 @@ pub struct TraceResultSimd<'a> {
 impl<'a> TraceResultSimd<'a> {
     fn new<'b>() -> TraceResultSimd<'b> {
         TraceResultSimd {
-            hit_dist: f32x4::splat(f32::MAX),
+            hit_dist: f32x4::splat(f32::INFINITY),
             object: [None; 4],
         }
     }
@@ -101,13 +101,13 @@ impl Sphere {
                 let t1 = tca + thc;
                 let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
-                let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+                let t = t1_valid.blend(t1, f32x4::splat(f32::INFINITY));
                 t0_valid.blend(t0, t)
             } else {
-                t0_valid.blend(t0, f32x4::splat(f32::MAX))
+                t0_valid.blend(t0, f32x4::splat(f32::INFINITY))
             }
         } else {
-            f32x4::splat(f32::MAX)
+            f32x4::splat(f32::INFINITY)
         }
     }
 }
@@ -246,7 +246,7 @@ fn main() {
                 scene.trace_simd(&cam_posx4, rays, false)
             };
 
-            if closest_hit.cmp_lt(f32::MAX).none() {
+            if closest_hit.cmp_lt(f32::INFINITY).none() {
                 return;
             }
 
@@ -285,7 +285,7 @@ fn main() {
                 scene.trace_simd(&hit_pos, &shadow_ray, false)
             };
 
-            if shadow_hit.cmp_lt(f32::MAX).all() {
+            if shadow_hit.cmp_lt(f32::INFINITY).all() {
                 return;
             }
 
@@ -298,7 +298,7 @@ fn main() {
             let mut color = Vec3::zero();
             for i in 0..4 {
                 if let Some(o) = closest_obj[i] {
-                    if shadow_hit[i] >= f32::MAX {
+                    if shadow_hit[i] >= f32::INFINITY {
                         color += o.color * ndl[i] / 4.;
                     }
                 }
