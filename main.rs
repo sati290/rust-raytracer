@@ -25,7 +25,7 @@ impl<'a> TraceResultSimd<'a> {
 
     fn add_hit(&mut self, hit_dist: f32x4, object: &'a Sphere) {
         let closest = hit_dist.cmp_lt(self.hit_dist);
-        self.hit_dist = closest.blend(hit_dist, self.hit_dist);
+        self.hit_dist = self.hit_dist.min(hit_dist);
 
         let closest_mask = closest.move_mask();
         for (i, obj) in self.object.iter_mut().enumerate() {
