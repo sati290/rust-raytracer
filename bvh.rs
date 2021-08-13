@@ -15,7 +15,7 @@ enum BvhNode<'a> {
 }
 
 impl<'a> BvhNode<'a> {
-    fn trace(
+    fn trace_recursive(
         &self,
         ray_origin: &Vec3x4,
         ray_direction: &Vec3x4,
@@ -31,13 +31,23 @@ impl<'a> BvhNode<'a> {
                     .intersect(ray_origin, ray_direction_recip)
                     .any()
                 {
-                    children[0].trace(ray_origin, ray_direction, ray_direction_recip, result)
+                    children[0].trace_recursive(
+                        ray_origin,
+                        ray_direction,
+                        ray_direction_recip,
+                        result,
+                    )
                 };
                 if child_bbox[1]
                     .intersect(ray_origin, ray_direction_recip)
                     .any()
                 {
-                    children[1].trace(ray_origin, ray_direction, ray_direction_recip, result)
+                    children[1].trace_recursive(
+                        ray_origin,
+                        ray_direction,
+                        ray_direction_recip,
+                        result,
+                    )
                 };
             }
             BvhNode::Leaf { object } => {
@@ -45,6 +55,34 @@ impl<'a> BvhNode<'a> {
                 result.add_hit(hit, object);
             }
         }
+    }
+}
+
+struct BvhNodeStack<'a> {
+    stack: [Option<&'a BvhNode<'a>>; 32],
+    size: usize,
+}
+
+impl<'a> BvhNodeStack<'a> {
+    fn new() -> Self {
+        BvhNodeStack {
+            stack: Default::default(),
+            size: 0,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.size
+    }
+
+    fn push(&mut self, node: &'a BvhNode) {
+        self.stack[self.size] = Some(node);
+        self.size += 1;
+    }
+
+    fn pop(&mut self) -> &'a BvhNode<'a> {
+        self.size -= 1;
+        self.stack[self.size].unwrap()
     }
 }
 
@@ -139,8 +177,48 @@ impl Bvh<'_> {
     pub fn trace(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
         let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
         let mut result = TraceResultSimd::new();
-        self.root_node
-            .trace(ray_origin, ray_direction, &ray_direction_recip, &mut result);
+        let mut stack = BvhNodeStack::new();
+
+        stack.push(&self.root_node);
+        while stack.len() > 0 {
+            let node = stack.pop();
+            match node {
+                BvhNode::Inner {
+                    child_bbox,
+                    children,
+                } => {
+                    if child_bbox[0]
+                        .intersect(ray_origin, &ray_direction_recip)
+                        .any()
+                    {
+                        stack.push(&children[0]);
+                    };
+                    if child_bbox[1]
+                        .intersect(ray_origin, &ray_direction_recip)
+                        .any()
+                    {
+                        stack.push(&children[1]);
+                    };
+                }
+                BvhNode::Leaf { object } => {
+                    let hit = object.intersect_simd(ray_origin, ray_direction, false);
+                    result.add_hit(hit, object);
+                }
+            }
+        }
+
+        result
+    }
+
+    pub fn trace_recursive(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
+        let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
+        let mut result = TraceResultSimd::new();
+        self.root_node.trace_recursive(
+            ray_origin,
+            ray_direction,
+            &ray_direction_recip,
+            &mut result,
+        );
 
         result
     }
