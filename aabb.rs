@@ -1,7 +1,5 @@
-use crate::f32x4;
-use crate::CmpGe;
-use crate::Vec3;
-use crate::Vec3x4;
+use ultraviolet::{Vec3, Vec3x4, Vec3x8};
+use wide::{f32x4, f32x8, CmpGe};
 
 #[derive(Clone, Copy)]
 pub struct Aabb {
@@ -121,5 +119,62 @@ impl AabbSimd {
         let tmax = tmax.min(tz1.max(tz2));
 
         tmax.cmp_ge(tmin.max(f32x4::ZERO))
+    }
+}
+
+pub struct AabbSimdx2 {
+    pub min: Vec3x8,
+    pub max: Vec3x8,
+}
+
+impl From<[Aabb; 2]> for AabbSimdx2 {
+    fn from(other: [Aabb; 2]) -> Self {
+        AabbSimdx2 {
+            min: Vec3x8::from([
+                other[0].min,
+                other[0].min,
+                other[0].min,
+                other[0].min,
+                other[1].min,
+                other[1].min,
+                other[1].min,
+                other[1].min,
+            ]),
+            max: Vec3x8::from([
+                other[0].max,
+                other[0].max,
+                other[0].max,
+                other[0].max,
+                other[1].max,
+                other[1].max,
+                other[1].max,
+                other[1].max,
+            ]),
+        }
+    }
+}
+
+impl AabbSimdx2 {
+    #[must_use]
+    pub fn intersect(&self, ray_origin: &Vec3x8, ray_direction_recip: &Vec3x8) -> f32x8 {
+        let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
+        let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
+
+        let tmin = tx1.min(tx2);
+        let tmax = tx1.max(tx2);
+
+        let ty1 = (self.min.y - ray_origin.y) * ray_direction_recip.y;
+        let ty2 = (self.max.y - ray_origin.y) * ray_direction_recip.y;
+
+        let tmin = tmin.max(ty1.min(ty2));
+        let tmax = tmax.min(ty1.max(ty2));
+
+        let tz1 = (self.min.z - ray_origin.z) * ray_direction_recip.z;
+        let tz2 = (self.max.z - ray_origin.z) * ray_direction_recip.z;
+
+        let tmin = tmin.max(tz1.min(tz2));
+        let tmax = tmax.min(tz1.max(tz2));
+
+        tmax.cmp_ge(tmin.max(f32x8::ZERO))
     }
 }

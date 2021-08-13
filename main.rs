@@ -280,7 +280,7 @@ fn main() {
                 hit_dist: shadow_hit,
                 ..
             } = if use_bvh {
-                bvh.trace_recursive(&hit_pos, &shadow_ray)
+                bvh.trace(&hit_pos, &shadow_ray)
             } else {
                 scene.trace_simd(&hit_pos, &shadow_ray, false)
             };

@@ -1,61 +1,16 @@
-use crate::aabb::{Aabb, AabbSimd};
+use crate::aabb::{Aabb, AabbSimdx2};
 use crate::Sphere;
 use crate::TraceResultSimd;
-use crate::Vec3;
-use crate::Vec3x4;
+use ultraviolet::{Vec3, Vec3x4, Vec3x8};
 
 enum BvhNode<'a> {
     Inner {
-        child_bbox: [AabbSimd; 2],
+        child_bounds: AabbSimdx2,
         children: [Box<BvhNode<'a>>; 2],
     },
     Leaf {
         object: &'a Sphere,
     },
-}
-
-impl<'a> BvhNode<'a> {
-    fn trace_recursive(
-        &self,
-        ray_origin: &Vec3x4,
-        ray_direction: &Vec3x4,
-        ray_direction_recip: &Vec3x4,
-        result: &mut TraceResultSimd<'a>,
-    ) {
-        match self {
-            BvhNode::Inner {
-                child_bbox,
-                children,
-            } => {
-                if child_bbox[0]
-                    .intersect(ray_origin, ray_direction_recip)
-                    .any()
-                {
-                    children[0].trace_recursive(
-                        ray_origin,
-                        ray_direction,
-                        ray_direction_recip,
-                        result,
-                    )
-                };
-                if child_bbox[1]
-                    .intersect(ray_origin, ray_direction_recip)
-                    .any()
-                {
-                    children[1].trace_recursive(
-                        ray_origin,
-                        ray_direction,
-                        ray_direction_recip,
-                        result,
-                    )
-                };
-            }
-            BvhNode::Leaf { object } => {
-                let hit = object.intersect_simd(ray_origin, ray_direction, false);
-                result.add_hit(hit, object);
-            }
-        }
-    }
 }
 
 struct BvhNodeStack<'a> {
@@ -164,7 +119,7 @@ impl Bvh<'_> {
             let child_right = Bvh::build_recursive(objects_right);
 
             BvhNode::Inner {
-                child_bbox: [AabbSimd::from(bounds_l), AabbSimd::from(bounds_r)],
+                child_bounds: AabbSimdx2::from([bounds_l, bounds_r]),
                 children: [Box::new(child_left), Box::new(child_right)],
             }
         } else {
@@ -176,6 +131,30 @@ impl Bvh<'_> {
 
     pub fn trace(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
         let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
+
+        let ray_originx8: [Vec3; 4] = (*ray_origin).into();
+        let ray_originx8 = Vec3x8::from([
+            ray_originx8[0],
+            ray_originx8[1],
+            ray_originx8[2],
+            ray_originx8[3],
+            ray_originx8[0],
+            ray_originx8[1],
+            ray_originx8[2],
+            ray_originx8[3],
+        ]);
+        let ray_direction_recipx8: [Vec3; 4] = ray_direction_recip.into();
+        let ray_direction_recipx8 = Vec3x8::from([
+            ray_direction_recipx8[0],
+            ray_direction_recipx8[1],
+            ray_direction_recipx8[2],
+            ray_direction_recipx8[3],
+            ray_direction_recipx8[0],
+            ray_direction_recipx8[1],
+            ray_direction_recipx8[2],
+            ray_direction_recipx8[3],
+        ]);
+
         let mut result = TraceResultSimd::new();
         let mut stack = BvhNodeStack::new();
 
@@ -184,21 +163,18 @@ impl Bvh<'_> {
             let node = stack.pop();
             match node {
                 BvhNode::Inner {
-                    child_bbox,
+                    child_bounds,
                     children,
                 } => {
-                    if child_bbox[0]
-                        .intersect(ray_origin, &ray_direction_recip)
-                        .any()
-                    {
+                    let aabb_hit = child_bounds.intersect(&ray_originx8, &ray_direction_recipx8);
+                    let hit_mask = aabb_hit.move_mask();
+
+                    if hit_mask & 0b00001111 != 0 {
                         stack.push(&children[0]);
-                    };
-                    if child_bbox[1]
-                        .intersect(ray_origin, &ray_direction_recip)
-                        .any()
-                    {
+                    }
+                    if hit_mask & 0b11110000 != 0 {
                         stack.push(&children[1]);
-                    };
+                    }
                 }
                 BvhNode::Leaf { object } => {
                     let hit = object.intersect_simd(ray_origin, ray_direction, false);
@@ -206,19 +182,6 @@ impl Bvh<'_> {
                 }
             }
         }
-
-        result
-    }
-
-    pub fn trace_recursive(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
-        let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
-        let mut result = TraceResultSimd::new();
-        self.root_node.trace_recursive(
-            ray_origin,
-            ray_direction,
-            &ray_direction_recip,
-            &mut result,
-        );
 
         result
     }
