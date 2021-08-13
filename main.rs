@@ -1,11 +1,42 @@
+mod aabb;
+mod bvh;
+
+use aabb::Aabb;
+use bvh::Bvh;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::time::Instant;
 use ultraviolet::{Vec2, Vec3, Vec3x4};
-use wide::{f32x4, CmpGt, CmpLt};
+use wide::{f32x4, CmpGe, CmpGt, CmpLt};
 
-struct Sphere {
+pub struct TraceResultSimd<'a> {
+    hit_dist: f32x4,
+    object: [Option<&'a Sphere>; 4],
+}
+
+impl<'a> TraceResultSimd<'a> {
+    fn new<'b>() -> TraceResultSimd<'b> {
+        TraceResultSimd {
+            hit_dist: f32x4::splat(f32::INFINITY),
+            object: [None; 4],
+        }
+    }
+
+    fn add_hit(&mut self, hit_dist: f32x4, object: &'a Sphere) {
+        let closest = hit_dist.cmp_lt(self.hit_dist);
+        self.hit_dist = closest.blend(hit_dist, self.hit_dist);
+
+        let closest_mask = closest.move_mask();
+        for (i, obj) in self.object.iter_mut().enumerate() {
+            if closest_mask & 1 << i != 0 {
+                *obj = Some(object);
+            }
+        }
+    }
+}
+
+pub struct Sphere {
     center: Vec3,
     centerx4: Vec3x4,
     radius: f32,
@@ -24,7 +55,15 @@ impl Sphere {
         }
     }
 
-    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
+    fn aabb(&self) -> Aabb {
+        let r = Vec3::broadcast(self.radius);
+        Aabb {
+            min: self.center - r,
+            max: self.center + r,
+        }
+    }
+
+    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3, backface: bool) -> Option<f32> {
         let r2 = self.radius2;
         let l = self.center - *ray_origin;
         let tca = l.dot(*ray_direction);
@@ -37,11 +76,9 @@ impl Sphere {
             let t0 = tca - thc;
             let t1 = tca + thc;
 
-            assert!(t0 <= t1);
-
             if t0 > 0. {
                 Some(t0)
-            } else if t1 > 0. {
+            } else if backface && t1 > 0. {
                 Some(t1)
             } else {
                 None
@@ -49,7 +86,7 @@ impl Sphere {
         }
     }
 
-    fn intersectx4(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
+    fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
         let l = self.centerx4 - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
@@ -64,13 +101,13 @@ impl Sphere {
                 let t1 = tca + thc;
                 let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
-                let t = t1_valid.blend(t1, f32x4::splat(f32::MAX));
+                let t = t1_valid.blend(t1, f32x4::splat(f32::INFINITY));
                 t0_valid.blend(t0, t)
             } else {
-                t0_valid.blend(t0, f32x4::splat(f32::MAX))
+                t0_valid.blend(t0, f32x4::splat(f32::INFINITY))
             }
         } else {
-            f32x4::splat(f32::MAX)
+            f32x4::splat(f32::INFINITY)
         }
     }
 }
@@ -80,28 +117,14 @@ struct Scene {
 }
 
 impl Scene {
-    fn tracex4(
-        &self,
-        origin: &Vec3x4,
-        direction: &Vec3x4,
-        backface: bool,
-    ) -> (f32x4, [Option<&Sphere>; 4]) {
-        let mut closest_hit = f32x4::splat(f32::MAX);
-        let mut closest_obj: [Option<&Sphere>; 4] = [None; 4];
+    fn trace_simd(&self, origin: &Vec3x4, direction: &Vec3x4, backface: bool) -> TraceResultSimd {
+        let mut result = TraceResultSimd::new();
         for o in &self.objects {
-            let hit = o.intersectx4(origin, direction, backface);
-            let closest = hit.cmp_lt(closest_hit);
-            closest_hit = closest.blend(hit, closest_hit);
-
-            let closest_mask = closest.move_mask();
-            for (i, obj) in closest_obj.iter_mut().enumerate() {
-                if closest_mask & 1 << i != 0 {
-                    *obj = Some(o);
-                }
-            }
+            let hit = o.intersect_simd(origin, direction, backface);
+            result.add_hit(hit, o);
         }
 
-        (closest_hit, closest_obj)
+        result
     }
 }
 
@@ -184,6 +207,10 @@ fn main() {
         }
     };
 
+    let bvh_start = Instant::now();
+    let bvh = Bvh::build(&scene.objects);
+    println!("bvh build {:.2?}", bvh_start.elapsed());
+
     let cam_pos = Vec3::new(0., 0., -30.);
     let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
@@ -209,9 +236,17 @@ fn main() {
     let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let (closest_hit, closest_obj) = scene.tracex4(&cam_posx4, rays, false);
+            let use_bvh = true;
+            let TraceResultSimd {
+                hit_dist: closest_hit,
+                object: closest_obj,
+            } = if use_bvh {
+                bvh.trace(&cam_posx4, rays)
+            } else {
+                scene.trace_simd(&cam_posx4, rays, false)
+            };
 
-            if closest_hit.cmp_lt(f32::MAX).none() {
+            if closest_hit.cmp_lt(f32::INFINITY).none() {
                 return;
             }
 
@@ -241,9 +276,16 @@ fn main() {
             let hit_pos = cam_posx4 + *rays * closest_hit;
 
             let shadow_ray = (light_posx4 - hit_pos).normalized();
-            let (shadow_hit, _) = scene.tracex4(&hit_pos, &shadow_ray, false);
+            let TraceResultSimd {
+                hit_dist: shadow_hit,
+                ..
+            } = if use_bvh {
+                bvh.trace_recursive(&hit_pos, &shadow_ray)
+            } else {
+                scene.trace_simd(&hit_pos, &shadow_ray, false)
+            };
 
-            if shadow_hit.cmp_lt(f32::MAX).all() {
+            if shadow_hit.cmp_lt(f32::INFINITY).all() {
                 return;
             }
 
@@ -256,7 +298,7 @@ fn main() {
             let mut color = Vec3::zero();
             for i in 0..4 {
                 if let Some(o) = closest_obj[i] {
-                    if shadow_hit[i] >= f32::MAX {
+                    if shadow_hit[i] >= f32::INFINITY {
                         color += o.color * ndl[i] / 4.;
                     }
                 }
