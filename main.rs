@@ -116,18 +116,6 @@ struct Scene {
     objects: Vec<Sphere>,
 }
 
-impl Scene {
-    fn trace_simd(&self, origin: &Vec3x4, direction: &Vec3x4, backface: bool) -> TraceResultSimd {
-        let mut result = TraceResultSimd::new();
-        for o in &self.objects {
-            let hit = o.intersect_simd(origin, direction, backface);
-            result.add_hit(hit, o);
-        }
-
-        result
-    }
-}
-
 fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
@@ -236,15 +224,10 @@ fn main() {
     let frames = 500;
     for _ in 0..frames {
         rt_jobs.par_iter_mut().for_each(|(pixel, rays)| {
-            let use_bvh = true;
             let TraceResultSimd {
                 hit_dist: closest_hit,
                 object: closest_obj,
-            } = if use_bvh {
-                bvh.trace(&cam_posx4, rays)
-            } else {
-                scene.trace_simd(&cam_posx4, rays, false)
-            };
+            } = bvh.trace(&cam_posx4, rays);
 
             if closest_hit.cmp_lt(f32::INFINITY).none() {
                 return;
@@ -279,11 +262,7 @@ fn main() {
             let TraceResultSimd {
                 hit_dist: shadow_hit,
                 ..
-            } = if use_bvh {
-                bvh.trace(&hit_pos, &shadow_ray)
-            } else {
-                scene.trace_simd(&hit_pos, &shadow_ray, false)
-            };
+            } = bvh.trace(&hit_pos, &shadow_ray);
 
             if shadow_hit.cmp_lt(f32::INFINITY).all() {
                 return;
