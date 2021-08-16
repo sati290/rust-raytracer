@@ -27,25 +27,6 @@ impl Ray {
     }
 }
 
-#[derive(Clone)]
-pub struct TraceJob {
-    ray_origin: Vec3,
-    ray_direction: Vec3,
-    //hit_dist: f32,
-    //hit_object: Option<&'a Sphere>,
-}
-
-impl TraceJob {
-    fn new(ray_origin: &Vec3, ray_direction: &Vec3) -> Self {
-        TraceJob {
-            ray_origin: *ray_origin,
-            ray_direction: *ray_direction,
-            //hit_dist: f32::INFINITY,
-            //hit_object: None,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct TraceResult<'a> {
     hit_dist: f32,
