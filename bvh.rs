@@ -1,8 +1,11 @@
 use crate::aabb::{Aabb, AabbSimd};
+use crate::Ray;
 use crate::Sphere;
+use crate::TraceResult;
 use crate::TraceResultSimd;
 use crate::Vec3;
 use crate::Vec3x4;
+use crate::NUM_SUBSAMPLES;
 
 enum BvhNode<'a> {
     Inner {
@@ -47,7 +50,7 @@ pub struct Bvh<'a> {
     root_node: BvhNode<'a>,
 }
 
-impl Bvh<'_> {
+impl<'a> Bvh<'a> {
     pub fn build(objects: &[Sphere]) -> Bvh {
         let mut objects: Vec<&Sphere> = objects.iter().collect();
         let root_node = Bvh::build_recursive(&mut objects);
@@ -55,7 +58,7 @@ impl Bvh<'_> {
         Bvh { objects, root_node }
     }
 
-    fn build_recursive<'a>(objects: &mut [&'a Sphere]) -> BvhNode<'a> {
+    fn build_recursive<'b>(objects: &mut [&'b Sphere]) -> BvhNode<'b> {
         if objects.len() > 1 {
             let mut bounds = Aabb::empty();
             let mut centroid_bounds = Aabb::empty();
@@ -164,5 +167,32 @@ impl Bvh<'_> {
         }
 
         result
+    }
+
+    pub fn trace_packet(&'a self, rays: &[Ray], results: &mut [TraceResult<'a>]) {
+        let mut i = 0;
+        while i < rays.len() {
+            let ro = Vec3x4::from([
+                rays[i].origin,
+                rays[i + 1].origin,
+                rays[i + 2].origin,
+                rays[i + 3].origin,
+            ]);
+            let rd = Vec3x4::from([
+                rays[i].direction,
+                rays[i + 1].direction,
+                rays[i + 2].direction,
+                rays[i + 3].direction,
+            ]);
+
+            let result = self.trace(&ro, &rd);
+            let hits: [f32; 4] = result.hit_dist.into();
+            for j in 0..NUM_SUBSAMPLES {
+                results[i + j].hit_dist = hits[j];
+                results[i + j].object = result.object[j];
+            }
+
+            i += NUM_SUBSAMPLES;
+        }
     }
 }
