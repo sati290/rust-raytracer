@@ -1,20 +1,74 @@
-use crate::aabb::{Aabb, AabbSimd};
-use crate::Ray;
-use crate::Sphere;
-use crate::TraceResult;
-use crate::TraceResultSimd;
+use crate::aabb::Aabb;
 use crate::Vec3;
 use crate::Vec3x4;
-use crate::NUM_SUBSAMPLES;
+use crate::{Frustum, Ray, Sphere, TraceResult, TraceResultSimd};
 
 enum BvhNode<'a> {
     Inner {
-        child_bbox: [AabbSimd; 2],
+        child_bbox: [Aabb; 2],
         children: [Box<BvhNode<'a>>; 2],
     },
     Leaf {
         object: &'a Sphere,
     },
+}
+
+impl<'a> BvhNode<'a> {
+    fn trace_packet_recursive(
+        &'a self,
+        rays: &[Ray],
+        frustum: &Frustum,
+        results: &mut [TraceResult<'a>],
+    ) {
+        match self {
+            BvhNode::Inner {
+                child_bbox,
+                children,
+            } => {
+                if let Some(i) = BvhNode::intersect_packet(&child_bbox[0], rays, frustum) {
+                    children[0].trace_packet_recursive(&rays[i..], frustum, &mut results[i..]);
+                };
+                if let Some(i) = BvhNode::intersect_packet(&child_bbox[1], rays, frustum) {
+                    children[1].trace_packet_recursive(&rays[i..], frustum, &mut results[i..]);
+                };
+            }
+            BvhNode::Leaf { object } => {
+                for (i, r) in rays.iter().enumerate() {
+                    let hit = object.intersect(&r.origin, &r.direction, false);
+                    if let Some(hit) = hit {
+                        results[i].add_hit(hit, object);
+                    }
+                }
+            }
+        }
+    }
+
+    fn intersect_packet(bbox: &Aabb, rays: &[Ray], frustum: &Frustum) -> Option<usize> {
+        if bbox.intersect(&rays[0].origin, &rays[0].direction_recip) {
+            return Some(0);
+        }
+
+        for (i, c) in rays.chunks_exact(4).enumerate() {
+            let origins = Vec3x4::from([c[0].origin, c[1].origin, c[2].origin, c[3].origin]);
+            let directions_recip = Vec3x4::from([
+                c[0].direction_recip,
+                c[1].direction_recip,
+                c[2].direction_recip,
+                c[3].direction_recip,
+            ]);
+            if bbox.intersect_simd(&origins, &directions_recip).any() {
+                return Some(i * 4);
+            }
+        }
+
+        for (i, r) in rays.chunks_exact(4).remainder().iter().enumerate() {
+            if bbox.intersect(&r.origin, &r.direction_recip) {
+                return Some(rays.len() / 4 * 4 + i);
+            }
+        }
+
+        None
+    }
 }
 
 struct BvhNodeStack<'a> {
@@ -123,7 +177,7 @@ impl<'a> Bvh<'a> {
             let child_right = Bvh::build_recursive(objects_right);
 
             BvhNode::Inner {
-                child_bbox: [AabbSimd::from(bounds_l), AabbSimd::from(bounds_r)],
+                child_bbox: [bounds_l, bounds_r],
                 children: [Box::new(child_left), Box::new(child_right)],
             }
         } else {
@@ -147,13 +201,13 @@ impl<'a> Bvh<'a> {
                     children,
                 } => {
                     if child_bbox[0]
-                        .intersect(ray_origin, &ray_direction_recip)
+                        .intersect_simd(ray_origin, &ray_direction_recip)
                         .any()
                     {
                         stack.push(&children[0]);
                     };
                     if child_bbox[1]
-                        .intersect(ray_origin, &ray_direction_recip)
+                        .intersect_simd(ray_origin, &ray_direction_recip)
                         .any()
                     {
                         stack.push(&children[1]);
@@ -169,30 +223,13 @@ impl<'a> Bvh<'a> {
         result
     }
 
-    pub fn trace_packet(&'a self, rays: &[Ray], results: &mut [TraceResult<'a>]) {
-        let mut i = 0;
-        while i < rays.len() {
-            let ro = Vec3x4::from([
-                rays[i].origin,
-                rays[i + 1].origin,
-                rays[i + 2].origin,
-                rays[i + 3].origin,
-            ]);
-            let rd = Vec3x4::from([
-                rays[i].direction,
-                rays[i + 1].direction,
-                rays[i + 2].direction,
-                rays[i + 3].direction,
-            ]);
-
-            let result = self.trace(&ro, &rd);
-            let hits: [f32; 4] = result.hit_dist.into();
-            for j in 0..NUM_SUBSAMPLES {
-                results[i + j].hit_dist = hits[j];
-                results[i + j].object = result.object[j];
-            }
-
-            i += NUM_SUBSAMPLES;
-        }
+    pub fn trace_packet(
+        &'a self,
+        rays: &[Ray],
+        frustum: &Frustum,
+        results: &mut [TraceResult<'a>],
+    ) {
+        self.root_node
+            .trace_packet_recursive(rays, frustum, results);
     }
 }

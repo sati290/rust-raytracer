@@ -1,5 +1,6 @@
 use crate::f32x4;
 use crate::CmpGe;
+use crate::Frustum;
 use crate::Vec3;
 use crate::Vec3x4;
 
@@ -83,25 +84,9 @@ impl Aabb {
 
         tmax >= tmin.max(0.)
     }
-}
 
-pub struct AabbSimd {
-    pub min: Vec3x4,
-    pub max: Vec3x4,
-}
-
-impl From<Aabb> for AabbSimd {
-    fn from(other: Aabb) -> Self {
-        AabbSimd {
-            min: Vec3x4::splat(other.min),
-            max: Vec3x4::splat(other.max),
-        }
-    }
-}
-
-impl AabbSimd {
     #[must_use]
-    pub fn intersect(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
+    pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
         let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
         let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
 
@@ -121,5 +106,10 @@ impl AabbSimd {
         let tmax = tmax.min(tz1.max(tz2));
 
         tmax.cmp_ge(tmin.max(f32x4::ZERO))
+    }
+
+    #[must_use]
+    pub fn intersect_frustum(&self, frustum: &Frustum) -> bool {
+        true
     }
 }

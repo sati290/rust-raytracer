@@ -16,6 +16,7 @@ const PACKET_SIZE: u32 = 8;
 pub struct Ray {
     origin: Vec3,
     direction: Vec3,
+    direction_recip: Vec3,
 }
 
 impl Ray {
@@ -23,7 +24,27 @@ impl Ray {
         Ray {
             origin: *origin,
             direction: *direction,
+            direction_recip: Vec3::one() / *direction,
         }
+    }
+}
+
+pub struct Frustum {
+    normals: [Vec3; 4],
+    offsets: [f32; 4],
+}
+
+impl Frustum {
+    fn from_corner_rays(rays: &[Ray; 4]) -> Self {
+        let mut normals: [Vec3; 4] = Default::default();
+        let mut offsets: [f32; 4] = Default::default();
+
+        for i in 0..4 {
+            normals[i] = rays[i].direction * rays[(i + 1) % 4].direction;
+            offsets[i] = rays[i].origin.dot(normals[i]);
+        }
+
+        Frustum { normals, offsets }
     }
 }
 
@@ -260,7 +281,22 @@ fn main() {
                 }
             }
 
-            (pixels, rays)
+            let mut min = Vec2::broadcast(f32::INFINITY);
+            let mut max = Vec2::broadcast(f32::NEG_INFINITY);
+            for r in &rays {
+                let uv = r.direction.xy() / r.direction.z;
+                min = min.min_by_component(uv);
+                max = max.max_by_component(uv);
+            }
+
+            let frustum = Frustum::from_corner_rays(&[
+                Ray::new(&cam_pos, &Vec3::new(min.x, min.y, 1.).normalized()),
+                Ray::new(&cam_pos, &Vec3::new(max.x, min.y, 1.).normalized()),
+                Ray::new(&cam_pos, &Vec3::new(max.x, max.y, 1.).normalized()),
+                Ray::new(&cam_pos, &Vec3::new(min.x, max.y, 1.).normalized()),
+            ]);
+
+            (pixels, rays, frustum)
         })
         .collect();
 
@@ -276,10 +312,10 @@ fn main() {
 
     let frames = 500;
     for _ in 0..frames {
-        packets.par_iter_mut().for_each(|(pixels, rays)| {
+        packets.par_iter_mut().for_each(|(pixels, rays, frustum)| {
             let mut trace_results =
                 [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
-            bvh.trace_packet(rays, &mut trace_results);
+            bvh.trace_packet(rays, frustum, &mut trace_results);
 
             for (i, (x, y, pixel)) in pixels.iter_mut().enumerate() {
                 let closest_hit = f32x4::from([
