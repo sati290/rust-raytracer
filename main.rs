@@ -40,7 +40,7 @@ impl Frustum {
         let mut offsets: [f32; 4] = Default::default();
 
         for i in 0..4 {
-            normals[i] = rays[i].direction * rays[(i + 1) % 4].direction;
+            normals[i] = rays[i].direction.cross(rays[(i + 1) % 4].direction).normalized();
             offsets[i] = rays[i].origin.dot(normals[i]);
         }
 

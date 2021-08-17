@@ -59,25 +59,28 @@ impl<'a> BvhNode<'a> {
     ) -> Option<usize> {
         let rays = &rays[first_active_ray..];
         if bbox.intersect(&rays[0].origin, &rays[0].direction_recip) {
-            return Some(first_active_ray);
+            //return Some(first_active_ray);
+            println!("hit");
         }
 
-        for (i, c) in rays.chunks_exact(4).enumerate() {
-            let origins = Vec3x4::from([c[0].origin, c[1].origin, c[2].origin, c[3].origin]);
-            let directions_recip = Vec3x4::from([
-                c[0].direction_recip,
-                c[1].direction_recip,
-                c[2].direction_recip,
-                c[3].direction_recip,
-            ]);
-            if bbox.intersect_simd(&origins, &directions_recip).any() {
-                return Some(first_active_ray + i * 4);
+        if bbox.intersect_frustum(frustum) {
+            for (i, c) in rays.chunks_exact(4).enumerate() {
+                let origins = Vec3x4::from([c[0].origin, c[1].origin, c[2].origin, c[3].origin]);
+                let directions_recip = Vec3x4::from([
+                    c[0].direction_recip,
+                    c[1].direction_recip,
+                    c[2].direction_recip,
+                    c[3].direction_recip,
+                ]);
+                if bbox.intersect_simd(&origins, &directions_recip).any() {
+                    return Some(first_active_ray + i * 4);
+                }
             }
-        }
 
-        for (i, r) in rays.chunks_exact(4).remainder().iter().enumerate() {
-            if bbox.intersect(&r.origin, &r.direction_recip) {
-                return Some(first_active_ray + rays.len() / 4 * 4 + i);
+            for (i, r) in rays.chunks_exact(4).remainder().iter().enumerate() {
+                if bbox.intersect(&r.origin, &r.direction_recip) {
+                    return Some(first_active_ray + rays.len() / 4 * 4 + i);
+                }
             }
         }
 

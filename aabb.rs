@@ -3,6 +3,7 @@ use crate::CmpGe;
 use crate::Frustum;
 use crate::Vec3;
 use crate::Vec3x4;
+use wide::CmpGt;
 
 #[derive(Clone, Copy)]
 pub struct Aabb {
@@ -110,6 +111,16 @@ impl Aabb {
 
     #[must_use]
     pub fn intersect_frustum(&self, frustum: &Frustum) -> bool {
-        true
+        let plane_normals = Vec3x4::from(frustum.normals).abs();
+        let plane_normals = [plane_normals, -plane_normals];
+
+        let bmin = Vec3x4::splat(self.min);
+        let bmax = Vec3x4::splat(self.max);
+
+        let nplane = (plane_normals[0].x * bmin.x) + (plane_normals[1].x * bmax.x);
+        let nplane = (plane_normals[0].y * bmin.y) + (plane_normals[1].y * bmax.y) + nplane;
+        let nplane = (plane_normals[0].z * bmin.z) + (plane_normals[1].z * bmax.z) + nplane;
+
+        nplane.cmp_gt(f32x4::ZERO).any()
     }
 }
