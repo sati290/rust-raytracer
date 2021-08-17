@@ -17,6 +17,7 @@ impl<'a> BvhNode<'a> {
     fn trace_packet_recursive(
         &'a self,
         rays: &[Ray],
+        first_active_ray: usize,
         frustum: &Frustum,
         results: &mut [TraceResult<'a>],
     ) {
@@ -25,27 +26,40 @@ impl<'a> BvhNode<'a> {
                 child_bbox,
                 children,
             } => {
-                if let Some(i) = BvhNode::intersect_packet(&child_bbox[0], rays, frustum) {
-                    children[0].trace_packet_recursive(&rays[i..], frustum, &mut results[i..]);
+                if let Some(i) =
+                    BvhNode::intersect_packet(&child_bbox[0], rays, first_active_ray, frustum)
+                {
+                    children[0].trace_packet_recursive(rays, i, frustum, results);
                 };
-                if let Some(i) = BvhNode::intersect_packet(&child_bbox[1], rays, frustum) {
-                    children[1].trace_packet_recursive(&rays[i..], frustum, &mut results[i..]);
+                if let Some(i) =
+                    BvhNode::intersect_packet(&child_bbox[1], rays, first_active_ray, frustum)
+                {
+                    children[1].trace_packet_recursive(rays, i, frustum, results);
                 };
             }
             BvhNode::Leaf { object } => {
-                for (i, r) in rays.iter().enumerate() {
-                    let hit = object.intersect(&r.origin, &r.direction, false);
+                for (ray, result) in rays[first_active_ray..]
+                    .iter()
+                    .zip(&mut results[first_active_ray..])
+                {
+                    let hit = object.intersect(&ray.origin, &ray.direction, false);
                     if let Some(hit) = hit {
-                        results[i].add_hit(hit, object);
+                        result.add_hit(hit, object);
                     }
                 }
             }
         }
     }
 
-    fn intersect_packet(bbox: &Aabb, rays: &[Ray], frustum: &Frustum) -> Option<usize> {
+    fn intersect_packet(
+        bbox: &Aabb,
+        rays: &[Ray],
+        first_active_ray: usize,
+        frustum: &Frustum,
+    ) -> Option<usize> {
+        let rays = &rays[first_active_ray..];
         if bbox.intersect(&rays[0].origin, &rays[0].direction_recip) {
-            return Some(0);
+            return Some(first_active_ray);
         }
 
         for (i, c) in rays.chunks_exact(4).enumerate() {
@@ -57,13 +71,13 @@ impl<'a> BvhNode<'a> {
                 c[3].direction_recip,
             ]);
             if bbox.intersect_simd(&origins, &directions_recip).any() {
-                return Some(i * 4);
+                return Some(first_active_ray + i * 4);
             }
         }
 
         for (i, r) in rays.chunks_exact(4).remainder().iter().enumerate() {
             if bbox.intersect(&r.origin, &r.direction_recip) {
-                return Some(rays.len() / 4 * 4 + i);
+                return Some(first_active_ray + rays.len() / 4 * 4 + i);
             }
         }
 
@@ -230,6 +244,6 @@ impl<'a> Bvh<'a> {
         results: &mut [TraceResult<'a>],
     ) {
         self.root_node
-            .trace_packet_recursive(rays, frustum, results);
+            .trace_packet_recursive(rays, 0, frustum, results);
     }
 }

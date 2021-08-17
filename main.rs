@@ -330,8 +330,6 @@ fn main() {
                     trace_results[(i * 4 + 2)].object,
                     trace_results[(i * 4 + 3)].object,
                 ];
-                // let closest_hit = f32x4::splat(f32::INFINITY);
-                // let closest_obj: [Option<&Sphere>; NUM_SUBSAMPLES] = [None; NUM_SUBSAMPLES];
 
                 if closest_hit.cmp_lt(f32::INFINITY).none() {
                     continue;
