@@ -290,10 +290,10 @@ fn main() {
             }
 
             let frustum = Frustum::from_corner_rays(&[
-                Ray::new(&cam_pos, &Vec3::new(min.x, min.y, 1.).normalized()),
-                Ray::new(&cam_pos, &Vec3::new(max.x, min.y, 1.).normalized()),
-                Ray::new(&cam_pos, &Vec3::new(max.x, max.y, 1.).normalized()),
-                Ray::new(&cam_pos, &Vec3::new(min.x, max.y, 1.).normalized()),
+                Ray::new(&cam_pos, &Vec3::new(min.x, min.y, 1.)),
+                Ray::new(&cam_pos, &Vec3::new(min.x, max.y, 1.)),
+                Ray::new(&cam_pos, &Vec3::new(max.x, max.y, 1.)),
+                Ray::new(&cam_pos, &Vec3::new(max.x, min.y, 1.)),
             ]);
 
             (pixels, rays, frustum)

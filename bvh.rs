@@ -59,8 +59,7 @@ impl<'a> BvhNode<'a> {
     ) -> Option<usize> {
         let rays = &rays[first_active_ray..];
         if bbox.intersect(&rays[0].origin, &rays[0].direction_recip) {
-            //return Some(first_active_ray);
-            println!("hit");
+            return Some(first_active_ray);
         }
 
         if bbox.intersect_frustum(frustum) {
