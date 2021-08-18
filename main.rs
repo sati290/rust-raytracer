@@ -32,6 +32,7 @@ impl Ray {
 pub struct Frustum {
     normals: [Vec3; 4],
     offsets: [f32; 4],
+    normals_optimized: [Vec3x4; 2],
 }
 
 impl Frustum {
@@ -44,7 +45,13 @@ impl Frustum {
             offsets[i] = rays[i].origin.dot(normals[i]);
         }
 
-        Frustum { normals, offsets }
+        let normals_optimized = Vec3x4::from(normals);
+        let normals_optimized = [
+            normals_optimized.max_by_component(Vec3x4::zero()),
+            normals_optimized.min_by_component(Vec3x4::zero()),
+        ];
+
+        Frustum { normals, offsets, normals_optimized }
     }
 }
 

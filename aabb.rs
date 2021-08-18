@@ -111,34 +111,13 @@ impl Aabb {
 
     #[must_use]
     pub fn intersect_frustum(&self, frustum: &Frustum) -> bool {
-        for i in 0..4 {
-            let vn = Vec3::new(
-                if frustum.normals[i].x >= 0. { self.min.x } else {self.max.x},
-                if frustum.normals[i].y >= 0. { self.min.y } else {self.max.y},
-                if frustum.normals[i].z >= 0. { self.min.z } else {self.max.z},
-            );
+        let bmin = Vec3x4::splat(self.min);
+        let bmax = Vec3x4::splat(self.max);
 
-            let a = vn.dot(frustum.normals[i]) - frustum.offsets[i];
-            if a > 0. {
-                return false;
-            }
-        }        
+        let nplane = (frustum.normals_optimized[0].x * bmin.x) + (frustum.normals_optimized[1].x * bmax.x);
+        let nplane = (frustum.normals_optimized[0].y * bmin.y) + (frustum.normals_optimized[1].y * bmax.y) + nplane;
+        let nplane = (frustum.normals_optimized[0].z * bmin.z) + (frustum.normals_optimized[1].z * bmax.z) + nplane;
 
-        true
-
-        // let plane_normals = Vec3x4::from(frustum.normals);
-        // let plane_normals = [
-        //     plane_normals.max_by_component(Vec3x4::zero()),
-        //     plane_normals.min_by_component(Vec3x4::zero()),
-        // ];
-
-        // let bmin = Vec3x4::splat(self.min);
-        // let bmax = Vec3x4::splat(self.max);
-
-        // let nplane = (plane_normals[0].x * bmin.x) + (plane_normals[1].x * bmax.x);
-        // let nplane = (plane_normals[0].y * bmin.y) + (plane_normals[1].y * bmax.y) + nplane;
-        // let nplane = (plane_normals[0].z * bmin.z) + (plane_normals[1].z * bmax.z) + nplane;
-
-        // nplane.cmp_gt(f32x4::ZERO).any()
+        nplane.cmp_gt(f32x4::from(frustum.offsets)).none()
     }
 }
