@@ -191,6 +191,26 @@ struct Scene {
     objects: Vec<Sphere>,
 }
 
+struct RayPacket<'a> {
+    pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+    rays: Vec<Ray>,
+    frustum: Frustum,
+}
+
+impl<'a> RayPacket<'a> {
+    fn new(
+        pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+        rays: Vec<Ray>,
+        frustum: Frustum,
+    ) -> Self {
+        RayPacket {
+            pixels,
+            rays,
+            frustum,
+        }
+    }
+}
+
 fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
     image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
 }
@@ -250,6 +270,82 @@ fn generate_random_scene() -> Scene {
     scene
 }
 
+fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
+    let cam_posx4 = Vec3x4::splat(*cam_pos);
+    let light_posx4 = Vec3x4::splat(*light_pos);
+
+    let mut trace_results =
+        [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
+    bvh.trace_packet(&packet.rays, &packet.frustum, &mut trace_results);
+
+    for ((_x, _y, pixel), (rays, results)) in packet.pixels.iter_mut().zip(
+        packet
+            .rays
+            .chunks_exact(NUM_SUBSAMPLES)
+            .zip(trace_results.chunks_exact(NUM_SUBSAMPLES)),
+    ) {
+        let closest_hit = f32x4::from([
+            results[0].hit_dist,
+            results[1].hit_dist,
+            results[2].hit_dist,
+            results[3].hit_dist,
+        ]);
+        let closest_obj = [
+            results[0].object,
+            results[1].object,
+            results[2].object,
+            results[3].object,
+        ];
+
+        if closest_hit.cmp_lt(f32::INFINITY).none() {
+            continue;
+        }
+
+        let centers = Vec3x4::from([
+            closest_obj[0].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[1].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[2].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[3].map_or(Vec3::zero(), |o| o.center),
+        ]);
+
+        let rays = Vec3x4::from([
+            rays[0].direction,
+            rays[1].direction,
+            rays[2].direction,
+            rays[3].direction,
+        ]);
+
+        let hit_pos = cam_posx4 + rays * closest_hit;
+
+        let shadow_ray = (light_posx4 - hit_pos).normalized();
+        let TraceResultSimd {
+            hit_dist: shadow_hit,
+            ..
+        } = bvh.trace(&hit_pos, &shadow_ray);
+
+        if shadow_hit.cmp_lt(f32::INFINITY).all() {
+            continue;
+        }
+
+        let shadow_hit: [f32; 4] = shadow_hit.into();
+
+        let light_dir = (light_posx4 - hit_pos).normalized();
+        let normal = (hit_pos - centers).normalized();
+        let ndl = light_dir.dot(normal);
+        let ndl: [f32; 4] = ndl.into();
+        let mut color = Vec3::zero();
+        for i in 0..4 {
+            if let Some(o) = closest_obj[i] {
+                if shadow_hit[i] >= f32::INFINITY {
+                    color += o.color * ndl[i] / 4.;
+                }
+            }
+        }
+
+        **pixel = color_vec_to_rgb(color);
+    }
+}
+
 fn main() {
     let random_scene = true;
     let scene = if random_scene {
@@ -268,9 +364,7 @@ fn main() {
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
     let cam_pos = Vec3::new(0., 0., -30.);
-    let cam_posx4 = Vec3x4::splat(cam_pos);
     let light_pos = Vec3::new(10., 10., -20.);
-    let light_posx4 = Vec3x4::splat(light_pos);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
@@ -310,7 +404,7 @@ fn main() {
                 Ray::new(&cam_pos, &Vec3::new(max.x, min.y, 1.)),
             ]);
 
-            (pixels, rays, frustum)
+            RayPacket::new(pixels, rays, frustum)
         })
         .collect();
 
@@ -326,76 +420,9 @@ fn main() {
 
     let frames = 1000;
     for _ in 0..frames {
-        packets.par_iter_mut().for_each(|(pixels, rays, frustum)| {
-            let mut trace_results =
-                [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
-            bvh.trace_packet(rays, frustum, &mut trace_results);
-
-            for ((_x, _y, pixel), (rays, results)) in pixels.iter_mut().zip(
-                rays.chunks_exact(NUM_SUBSAMPLES)
-                    .zip(trace_results.chunks_exact(NUM_SUBSAMPLES)),
-            ) {
-                let closest_hit = f32x4::from([
-                    results[0].hit_dist,
-                    results[1].hit_dist,
-                    results[2].hit_dist,
-                    results[3].hit_dist,
-                ]);
-                let closest_obj = [
-                    results[0].object,
-                    results[1].object,
-                    results[2].object,
-                    results[3].object,
-                ];
-
-                if closest_hit.cmp_lt(f32::INFINITY).none() {
-                    continue;
-                }
-
-                let centers = Vec3x4::from([
-                    closest_obj[0].map_or(Vec3::zero(), |o| o.center),
-                    closest_obj[1].map_or(Vec3::zero(), |o| o.center),
-                    closest_obj[2].map_or(Vec3::zero(), |o| o.center),
-                    closest_obj[3].map_or(Vec3::zero(), |o| o.center),
-                ]);
-
-                let rays = Vec3x4::from([
-                    rays[0].direction,
-                    rays[1].direction,
-                    rays[2].direction,
-                    rays[3].direction,
-                ]);
-
-                let hit_pos = cam_posx4 + rays * closest_hit;
-
-                let shadow_ray = (light_posx4 - hit_pos).normalized();
-                let TraceResultSimd {
-                    hit_dist: shadow_hit,
-                    ..
-                } = bvh.trace(&hit_pos, &shadow_ray);
-
-                if shadow_hit.cmp_lt(f32::INFINITY).all() {
-                    continue;
-                }
-
-                let shadow_hit: [f32; 4] = shadow_hit.into();
-
-                let light_dir = (light_posx4 - hit_pos).normalized();
-                let normal = (hit_pos - centers).normalized();
-                let ndl = light_dir.dot(normal);
-                let ndl: [f32; 4] = ndl.into();
-                let mut color = Vec3::zero();
-                for i in 0..4 {
-                    if let Some(o) = closest_obj[i] {
-                        if shadow_hit[i] >= f32::INFINITY {
-                            color += o.color * ndl[i] / 4.;
-                        }
-                    }
-                }
-
-                **pixel = color_vec_to_rgb(color);
-            }
-        });
+        packets
+            .par_iter_mut()
+            .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &light_pos));
     }
 
     let elapsed = time_start.elapsed();
