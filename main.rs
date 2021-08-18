@@ -11,7 +11,7 @@ use ultraviolet::{Vec2, Vec3, Vec3x4};
 use wide::{f32x4, CmpGe, CmpGt, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
-const PACKET_SIZE: u32 = 8;
+const PACKET_SIZE: u32 = 16;
 
 pub struct Ray {
     origin: Vec3,
@@ -317,7 +317,7 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 500;
+    let frames = 1000;
     for _ in 0..frames {
         packets.par_iter_mut().for_each(|(pixels, rays, frustum)| {
             let mut trace_results =
