@@ -331,18 +331,21 @@ fn main() {
                 [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
             bvh.trace_packet(rays, frustum, &mut trace_results);
 
-            for (i, (x, y, pixel)) in pixels.iter_mut().enumerate() {
+            for ((_x, _y, pixel), (rays, results)) in pixels.iter_mut().zip(
+                rays.chunks_exact(NUM_SUBSAMPLES)
+                    .zip(trace_results.chunks_exact(NUM_SUBSAMPLES)),
+            ) {
                 let closest_hit = f32x4::from([
-                    trace_results[(i * 4)].hit_dist,
-                    trace_results[(i * 4 + 1)].hit_dist,
-                    trace_results[(i * 4 + 2)].hit_dist,
-                    trace_results[(i * 4 + 3)].hit_dist,
+                    results[0].hit_dist,
+                    results[1].hit_dist,
+                    results[2].hit_dist,
+                    results[3].hit_dist,
                 ]);
                 let closest_obj = [
-                    trace_results[(i * 4)].object,
-                    trace_results[(i * 4 + 1)].object,
-                    trace_results[(i * 4 + 2)].object,
-                    trace_results[(i * 4 + 3)].object,
+                    results[0].object,
+                    results[1].object,
+                    results[2].object,
+                    results[3].object,
                 ];
 
                 if closest_hit.cmp_lt(f32::INFINITY).none() {
@@ -357,10 +360,10 @@ fn main() {
                 ]);
 
                 let rays = Vec3x4::from([
-                    rays[(i * 4)].direction,
-                    rays[(i * 4) + 1].direction,
-                    rays[(i * 4) + 2].direction,
-                    rays[(i * 4) + 3].direction,
+                    rays[0].direction,
+                    rays[1].direction,
+                    rays[2].direction,
+                    rays[3].direction,
                 ]);
 
                 let hit_pos = cam_posx4 + rays * closest_hit;
