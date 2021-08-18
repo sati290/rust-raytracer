@@ -1,7 +1,9 @@
 use crate::f32x4;
 use crate::CmpGe;
+use crate::Frustum;
 use crate::Vec3;
 use crate::Vec3x4;
+use wide::CmpGt;
 
 #[derive(Clone, Copy)]
 pub struct Aabb {
@@ -83,25 +85,9 @@ impl Aabb {
 
         tmax >= tmin.max(0.)
     }
-}
 
-pub struct AabbSimd {
-    pub min: Vec3x4,
-    pub max: Vec3x4,
-}
-
-impl From<Aabb> for AabbSimd {
-    fn from(other: Aabb) -> Self {
-        AabbSimd {
-            min: Vec3x4::splat(other.min),
-            max: Vec3x4::splat(other.max),
-        }
-    }
-}
-
-impl AabbSimd {
     #[must_use]
-    pub fn intersect(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
+    pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
         let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
         let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
 
@@ -121,5 +107,20 @@ impl AabbSimd {
         let tmax = tmax.min(tz1.max(tz2));
 
         tmax.cmp_ge(tmin.max(f32x4::ZERO))
+    }
+
+    #[must_use]
+    pub fn intersect_frustum(&self, frustum: &Frustum) -> bool {
+        let bmin = Vec3x4::splat(self.min);
+        let bmax = Vec3x4::splat(self.max);
+
+        let mut nplane =
+            (frustum.normals_optimized[0].x * bmin.x) + (frustum.normals_optimized[1].x * bmax.x);
+        nplane +=
+            (frustum.normals_optimized[0].y * bmin.y) + (frustum.normals_optimized[1].y * bmax.y);
+        nplane +=
+            (frustum.normals_optimized[0].z * bmin.z) + (frustum.normals_optimized[1].z * bmax.z);
+
+        nplane.cmp_gt(f32x4::from(frustum.offsets)).none()
     }
 }
