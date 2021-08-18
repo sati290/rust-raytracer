@@ -114,9 +114,12 @@ impl Aabb {
         let bmin = Vec3x4::splat(self.min);
         let bmax = Vec3x4::splat(self.max);
 
-        let nplane = (frustum.normals_optimized[0].x * bmin.x) + (frustum.normals_optimized[1].x * bmax.x);
-        let nplane = (frustum.normals_optimized[0].y * bmin.y) + (frustum.normals_optimized[1].y * bmax.y) + nplane;
-        let nplane = (frustum.normals_optimized[0].z * bmin.z) + (frustum.normals_optimized[1].z * bmax.z) + nplane;
+        let mut nplane =
+            (frustum.normals_optimized[0].x * bmin.x) + (frustum.normals_optimized[1].x * bmax.x);
+        nplane +=
+            (frustum.normals_optimized[0].y * bmin.y) + (frustum.normals_optimized[1].y * bmax.y);
+        nplane +=
+            (frustum.normals_optimized[0].z * bmin.z) + (frustum.normals_optimized[1].z * bmax.z);
 
         nplane.cmp_gt(f32x4::from(frustum.offsets)).none()
     }

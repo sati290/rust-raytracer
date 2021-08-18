@@ -41,7 +41,10 @@ impl Frustum {
         let mut offsets: [f32; 4] = Default::default();
 
         for i in 0..4 {
-            normals[i] = rays[i].direction.cross(rays[(i + 1) % 4].direction).normalized();
+            normals[i] = rays[i]
+                .direction
+                .cross(rays[(i + 1) % 4].direction)
+                .normalized();
             offsets[i] = rays[i].origin.dot(normals[i]);
         }
 
@@ -51,7 +54,11 @@ impl Frustum {
             normals_optimized.min_by_component(Vec3x4::zero()),
         ];
 
-        Frustum { normals, offsets, normals_optimized }
+        Frustum {
+            normals,
+            offsets,
+            normals_optimized,
+        }
     }
 }
 
@@ -343,26 +350,10 @@ fn main() {
                 }
 
                 let centers = Vec3x4::from([
-                    if let Some(o) = closest_obj[0] {
-                        o.center
-                    } else {
-                        Vec3::zero()
-                    },
-                    if let Some(o) = closest_obj[1] {
-                        o.center
-                    } else {
-                        Vec3::zero()
-                    },
-                    if let Some(o) = closest_obj[2] {
-                        o.center
-                    } else {
-                        Vec3::zero()
-                    },
-                    if let Some(o) = closest_obj[3] {
-                        o.center
-                    } else {
-                        Vec3::zero()
-                    },
+                    closest_obj[0].map_or(Vec3::zero(), |o| o.center),
+                    closest_obj[1].map_or(Vec3::zero(), |o| o.center),
+                    closest_obj[2].map_or(Vec3::zero(), |o| o.center),
+                    closest_obj[3].map_or(Vec3::zero(), |o| o.center),
                 ]);
 
                 let rays = Vec3x4::from([
