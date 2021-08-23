@@ -1,7 +1,8 @@
 use crate::aabb::Aabb;
 use crate::Vec3;
 use crate::Vec3x4;
-use crate::{Frustum, Ray, Sphere, TraceResult, TraceResultSimd};
+use crate::{Frustum, Ray, Sphere, TraceResult};
+use wide::CmpLt;
 
 enum BvhNode<'a> {
     Inner {
@@ -203,9 +204,9 @@ impl<'a> Bvh<'a> {
         }
     }
 
-    pub fn trace(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> TraceResultSimd {
+    pub fn trace_shadow(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, ray_mask: i32) -> i32 {
         let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
-        let mut result = TraceResultSimd::new();
+        let mut result = !ray_mask;
         let mut stack = BvhNodeStack::new();
 
         stack.push(&self.root_node);
@@ -218,20 +219,27 @@ impl<'a> Bvh<'a> {
                 } => {
                     if child_bbox[0]
                         .intersect_simd(ray_origin, &ray_direction_recip)
-                        .any()
+                        .move_mask()
+                        & !result
+                        != 0
                     {
                         stack.push(&children[0]);
                     };
                     if child_bbox[1]
                         .intersect_simd(ray_origin, &ray_direction_recip)
-                        .any()
+                        .move_mask()
+                        & !result
+                        != 0
                     {
                         stack.push(&children[1]);
                     };
                 }
                 BvhNode::Leaf { object } => {
                     let hit = object.intersect_simd(ray_origin, ray_direction, false);
-                    result.add_hit(hit, object);
+                    result |= hit.cmp_lt(f32::INFINITY).move_mask();
+                    if result == 0b1111 {
+                        return result;
+                    }
                 }
             }
         }

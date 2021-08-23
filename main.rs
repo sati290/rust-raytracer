@@ -295,7 +295,8 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
             results[3].hit_dist,
         ]);
 
-        if closest_hit.cmp_lt(f32::INFINITY).none() {
+        let hit_mask = closest_hit.cmp_lt(f32::INFINITY).move_mask();
+        if hit_mask == 0 {
             continue;
         }
 
@@ -309,14 +310,11 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
         let hit_pos = cam_posx4 + rays * closest_hit;
 
         let shadow_ray = (light_posx4 - hit_pos).normalized();
-        let TraceResultSimd {
-            hit_dist: shadow_hit,
-            ..
-        } = bvh.trace(&hit_pos, &shadow_ray);
+        let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
         // packet.shadow_rays_total += 4;
         // packet.shadow_rays_active += closest_hit.cmp_lt(f32::INFINITY).move_mask().count_ones();
 
-        if shadow_hit.cmp_lt(f32::INFINITY).all() {
+        if shadow_hit == 0b1111 {
             continue;
         }
         let closest_obj = [
@@ -333,8 +331,6 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
             closest_obj[3].map_or(Vec3::zero(), |o| o.center),
         ]);
 
-        let shadow_hit: [f32; 4] = shadow_hit.into();
-
         let light_dir = (light_posx4 - hit_pos).normalized();
         let normal = (hit_pos - centers).normalized();
         let ndl = light_dir.dot(normal);
@@ -342,7 +338,7 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
         let mut color = Vec3::zero();
         for i in 0..4 {
             if let Some(o) = closest_obj[i] {
-                if shadow_hit[i] >= f32::INFINITY {
+                if shadow_hit & 1 << i == 0 {
                     color += o.color * ndl[i] / 4.;
                 }
             }
