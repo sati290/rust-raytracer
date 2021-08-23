@@ -195,6 +195,8 @@ struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
     rays: Vec<Ray>,
     frustum: Frustum,
+    // shadow_rays_total: u32,
+    // shadow_rays_active: u32,
 }
 
 impl<'a> RayPacket<'a> {
@@ -207,6 +209,8 @@ impl<'a> RayPacket<'a> {
             pixels,
             rays,
             frustum,
+            // shadow_rays_total: 0,
+            // shadow_rays_active: 0,
         }
     }
 }
@@ -290,23 +294,10 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
             results[2].hit_dist,
             results[3].hit_dist,
         ]);
-        let closest_obj = [
-            results[0].object,
-            results[1].object,
-            results[2].object,
-            results[3].object,
-        ];
 
         if closest_hit.cmp_lt(f32::INFINITY).none() {
             continue;
         }
-
-        let centers = Vec3x4::from([
-            closest_obj[0].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[1].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[2].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[3].map_or(Vec3::zero(), |o| o.center),
-        ]);
 
         let rays = Vec3x4::from([
             rays[0].direction,
@@ -322,10 +313,25 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
             hit_dist: shadow_hit,
             ..
         } = bvh.trace(&hit_pos, &shadow_ray);
+        // packet.shadow_rays_total += 4;
+        // packet.shadow_rays_active += closest_hit.cmp_lt(f32::INFINITY).move_mask().count_ones();
 
         if shadow_hit.cmp_lt(f32::INFINITY).all() {
             continue;
         }
+        let closest_obj = [
+            results[0].object,
+            results[1].object,
+            results[2].object,
+            results[3].object,
+        ];
+
+        let centers = Vec3x4::from([
+            closest_obj[0].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[1].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[2].map_or(Vec3::zero(), |o| o.center),
+            closest_obj[3].map_or(Vec3::zero(), |o| o.center),
+        ]);
 
         let shadow_hit: [f32; 4] = shadow_hit.into();
 
@@ -432,6 +438,10 @@ fn main() {
         frames,
         elapsed / frames
     );
+
+    // let shadow_rays_total = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_total);
+    // let shadow_rays_active = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_active);
+    // println!("shadow trace simd utilization {}%", shadow_rays_active as f32 / shadow_rays_total as f32 * 100.);
 
     image.save("output.png").unwrap();
 }
