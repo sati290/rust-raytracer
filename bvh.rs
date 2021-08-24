@@ -15,43 +15,6 @@ enum BvhNode<'a> {
 }
 
 impl<'a> BvhNode<'a> {
-    fn trace_packet_recursive(
-        &'a self,
-        rays: &[Ray],
-        first_active_ray: usize,
-        frustum: &Frustum,
-        results: &mut [TraceResult<'a>],
-    ) {
-        match self {
-            BvhNode::Inner {
-                child_bbox,
-                children,
-            } => {
-                if let Some(i) =
-                    BvhNode::intersect_packet(&child_bbox[0], rays, first_active_ray, frustum)
-                {
-                    children[0].trace_packet_recursive(rays, i, frustum, results);
-                };
-                if let Some(i) =
-                    BvhNode::intersect_packet(&child_bbox[1], rays, first_active_ray, frustum)
-                {
-                    children[1].trace_packet_recursive(rays, i, frustum, results);
-                };
-            }
-            BvhNode::Leaf { object } => {
-                for (ray, result) in rays[first_active_ray..]
-                    .iter()
-                    .zip(&mut results[first_active_ray..])
-                {
-                    let hit = object.intersect(&ray.origin, &ray.direction, false);
-                    if let Some(hit) = hit {
-                        result.add_hit(hit, object);
-                    }
-                }
-            }
-        }
-    }
-
     fn intersect_packet(
         bbox: &Aabb,
         rays: &[Ray],
@@ -88,12 +51,12 @@ impl<'a> BvhNode<'a> {
     }
 }
 
-struct BvhNodeStack<'a> {
-    stack: [Option<&'a BvhNode<'a>>; 32],
+struct BvhNodeStack<T> {
+    stack: [Option<T>; 32],
     size: usize,
 }
 
-impl<'a> BvhNodeStack<'a> {
+impl<T> BvhNodeStack<T> {
     fn new() -> Self {
         BvhNodeStack {
             stack: Default::default(),
@@ -105,19 +68,23 @@ impl<'a> BvhNodeStack<'a> {
         self.size
     }
 
-    fn push(&mut self, node: &'a BvhNode) {
-        self.stack[self.size] = Some(node);
+    fn push(&mut self, entry: T) {
+        self.stack[self.size] = Some(entry);
         self.size += 1;
     }
 
-    fn pop(&mut self) -> &'a BvhNode<'a> {
-        self.size -= 1;
-        self.stack[self.size].unwrap()
+    #[must_use]
+    fn pop(&mut self) -> Option<T> {
+        if self.size > 0 {
+            self.size -= 1;
+            self.stack[self.size].take()
+        } else {
+            None
+        }
     }
 }
 
 pub struct Bvh<'a> {
-    objects: Vec<&'a Sphere>,
     root_node: BvhNode<'a>,
 }
 
@@ -126,7 +93,7 @@ impl<'a> Bvh<'a> {
         let mut objects: Vec<&Sphere> = objects.iter().collect();
         let root_node = Bvh::build_recursive(&mut objects);
 
-        Bvh { objects, root_node }
+        Bvh { root_node }
     }
 
     fn build_recursive<'b>(objects: &mut [&'b Sphere]) -> BvhNode<'b> {
@@ -210,8 +177,7 @@ impl<'a> Bvh<'a> {
         let mut stack = BvhNodeStack::new();
 
         stack.push(&self.root_node);
-        while stack.len() > 0 {
-            let node = stack.pop();
+        while let Some(node) = stack.pop() {
             match node {
                 BvhNode::Inner {
                     child_bbox,
@@ -253,7 +219,38 @@ impl<'a> Bvh<'a> {
         frustum: &Frustum,
         results: &mut [TraceResult<'a>],
     ) {
-        self.root_node
-            .trace_packet_recursive(rays, 0, frustum, results);
+        let mut stack = BvhNodeStack::new();
+
+        stack.push((&self.root_node, 0));
+        while let Some((node, first_active_ray)) = stack.pop() {
+            match node {
+                BvhNode::Inner {
+                    child_bbox,
+                    children,
+                } => {
+                    if let Some(i) =
+                        BvhNode::intersect_packet(&child_bbox[0], rays, first_active_ray, frustum)
+                    {
+                        stack.push((&children[0], i))
+                    };
+                    if let Some(i) =
+                        BvhNode::intersect_packet(&child_bbox[1], rays, first_active_ray, frustum)
+                    {
+                        stack.push((&children[1], i))
+                    };
+                }
+                BvhNode::Leaf { object } => {
+                    for (ray, result) in rays[first_active_ray..]
+                        .iter()
+                        .zip(&mut results[first_active_ray..])
+                    {
+                        let hit = object.intersect(&ray.origin, &ray.direction, false);
+                        if let Some(hit) = hit {
+                            result.add_hit(hit, object);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
