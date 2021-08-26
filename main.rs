@@ -312,7 +312,7 @@ fn generate_random_scene() -> Scene {
     scene
 }
 
-/*fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
+fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
@@ -362,29 +362,28 @@ fn generate_random_scene() -> Scene {
             results[3].object,
         ];
 
-        let centers = Vec3x4::from([
-            closest_obj[0].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[1].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[2].map_or(Vec3::zero(), |o| o.center),
-            closest_obj[3].map_or(Vec3::zero(), |o| o.center),
+        let normal = Vec3x4::from([
+            closest_obj[0].map_or(Vec3::zero(), |o| o.normal),
+            closest_obj[1].map_or(Vec3::zero(), |o| o.normal),
+            closest_obj[2].map_or(Vec3::zero(), |o| o.normal),
+            closest_obj[3].map_or(Vec3::zero(), |o| o.normal),
         ]);
 
         let light_dir = (light_posx4 - hit_pos).normalized();
-        let normal = (hit_pos - centers).normalized();
         let ndl = light_dir.dot(normal);
         let ndl: [f32; 4] = ndl.into();
         let mut color = Vec3::zero();
         for i in 0..4 {
             if let Some(o) = closest_obj[i] {
                 if shadow_hit & 1 << i == 0 {
-                    color += o.color * ndl[i] / 4.;
+                    color += Vec3::one() * ndl[i] / 4.;
                 }
             }
         }
 
         **pixel = color_vec_to_rgb(color);
     }
-}*/
+}
 
 fn load_scene() -> Vec<Triangle> {
     let load_start = Instant::now();
@@ -440,7 +439,7 @@ fn main() {
 
     pixels.sort_by_key(|(x, y, _)| (y / PACKET_SIZE, x / PACKET_SIZE, *y, *x));
 
-    /*let mut packets: Vec<_> = pixels
+    let mut packets: Vec<_> = pixels
         .chunks_mut((PACKET_SIZE * PACKET_SIZE) as usize)
         .map(|pixels| {
             let mut rays = Vec::with_capacity(pixels.len() * NUM_SUBSAMPLES);
@@ -480,7 +479,7 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 1000;
+    let frames = 100;
     for _ in 0..frames {
         packets
             .par_iter_mut()
@@ -499,5 +498,5 @@ fn main() {
     // let shadow_rays_active = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_active);
     // println!("shadow trace simd utilization {}%", shadow_rays_active as f32 / shadow_rays_total as f32 * 100.);
 
-    image.save("output.png").unwrap();*/
+    image.save("output.png").unwrap();
 }
