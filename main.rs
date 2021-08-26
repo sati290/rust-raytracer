@@ -3,6 +3,7 @@ mod bvh;
 
 use aabb::Aabb;
 use bvh::Bvh;
+use obj::Obj;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -65,7 +66,7 @@ impl Frustum {
 #[derive(Clone, Copy)]
 pub struct TraceResult<'a> {
     hit_dist: f32,
-    object: Option<&'a Sphere>,
+    object: Option<&'a Triangle>,
 }
 
 impl<'a> TraceResult<'a> {
@@ -76,7 +77,7 @@ impl<'a> TraceResult<'a> {
         }
     }
 
-    fn add_hit(&mut self, hit_dist: f32, object: &'a Sphere) {
+    fn add_hit(&mut self, hit_dist: f32, object: &'a Triangle) {
         if hit_dist < self.hit_dist {
             self.hit_dist = hit_dist;
             self.object = Some(object);
@@ -111,6 +112,43 @@ impl<'a> TraceResultSimd<'a> {
     }
 }
 
+pub struct Triangle {
+    verts: [Vec3; 3],
+    normal: Vec3,
+}
+
+impl Triangle {
+    pub fn new(verts: [Vec3; 3]) -> Self {
+        let v0v1 = verts[1] - verts[0];
+        let v0v2 = verts[2] - verts[0];
+        let normal = v0v1.cross(v0v2).normalized();
+
+        Triangle { verts, normal }
+    }
+
+    pub fn aabb(&self) -> Aabb {
+        let mut aabb = Aabb::empty();
+
+        for v in self.verts {
+            aabb.grow_mut(v);
+        }
+
+        aabb
+    }
+
+    pub fn centroid(&self) -> Vec3 {
+        (self.verts[0] + self.verts[1] + self.verts[2]) / 3.
+    }
+
+    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
+        f32x4::splat(f32::INFINITY)
+    }
+
+    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
+        None
+    }
+}
+
 pub struct Sphere {
     center: Vec3,
     centerx4: Vec3x4,
@@ -138,7 +176,7 @@ impl Sphere {
         }
     }
 
-    fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3, backface: bool) -> Option<f32> {
+    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
         let r2 = self.radius2;
         let l = self.center - *ray_origin;
         let tca = l.dot(*ray_direction);
@@ -153,7 +191,7 @@ impl Sphere {
 
             if t0 > 0. {
                 Some(t0)
-            } else if backface && t1 > 0. {
+            } else if B && t1 > 0. {
                 Some(t1)
             } else {
                 None
@@ -161,7 +199,7 @@ impl Sphere {
         }
     }
 
-    fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, backface: bool) -> f32x4 {
+    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
         let l = self.centerx4 - *ray_origin;
         let tca = l.dot(*ray_direction);
         let d2 = l.dot(l) - tca * tca;
@@ -172,7 +210,7 @@ impl Sphere {
             let t0 = tca - thc;
             let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
 
-            if backface {
+            if B {
                 let t1 = tca + thc;
                 let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
 
@@ -274,7 +312,7 @@ fn generate_random_scene() -> Scene {
     scene
 }
 
-fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
+/*fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
@@ -346,23 +384,45 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
 
         **pixel = color_vec_to_rgb(color);
     }
+}*/
+
+fn load_scene() -> Vec<Triangle> {
+    let load_start = Instant::now();
+
+    let obj = Obj::load("./asian_dragon_obj/asian_dragon.obj").unwrap();
+
+    let mut triangles = vec![];
+    for o in obj.data.objects {
+        for g in o.groups {
+            for p in g.polys {
+                if p.0.len() != 3 {
+                    panic!();
+                }
+
+                let verts = [
+                    Vec3::from(obj.data.position[p.0[0].0]),
+                    Vec3::from(obj.data.position[p.0[1].0]),
+                    Vec3::from(obj.data.position[p.0[2].0]),
+                ];
+
+                triangles.push(Triangle::new(verts));
+            }
+        }
+    }
+    let elapsed = load_start.elapsed();
+    println!(
+        "model load {} triangles in {:.2?}",
+        triangles.len(),
+        elapsed
+    );
+
+    triangles
 }
 
 fn main() {
-    let random_scene = true;
-    let scene = if random_scene {
-        generate_random_scene()
-    } else {
-        Scene {
-            objects: vec![
-                Sphere::new(Vec3::new(0., 0., 0.), 5., Vec3::new(0.8, 0.8, 0.8)),
-                Sphere::new(Vec3::new(5., 0., -5.), 2., Vec3::new(0.8, 0.1, 0.1)),
-            ],
-        }
-    };
-
+    let triangles = load_scene();
     let bvh_start = Instant::now();
-    let bvh = Bvh::build(&scene.objects);
+    let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
     let cam_pos = Vec3::new(0., 0., -30.);
@@ -380,7 +440,7 @@ fn main() {
 
     pixels.sort_by_key(|(x, y, _)| (y / PACKET_SIZE, x / PACKET_SIZE, *y, *x));
 
-    let mut packets: Vec<_> = pixels
+    /*let mut packets: Vec<_> = pixels
         .chunks_mut((PACKET_SIZE * PACKET_SIZE) as usize)
         .map(|pixels| {
             let mut rays = Vec::with_capacity(pixels.len() * NUM_SUBSAMPLES);
@@ -439,5 +499,5 @@ fn main() {
     // let shadow_rays_active = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_active);
     // println!("shadow trace simd utilization {}%", shadow_rays_active as f32 / shadow_rays_total as f32 * 100.);
 
-    image.save("output.png").unwrap();
+    image.save("output.png").unwrap();*/
 }

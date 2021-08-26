@@ -11,6 +11,7 @@ rayon = "1.5.1"
 ultraviolet = "0.8.1"
 wide = "0.6.5"
 rand = "0.8.4"
+obj = "0.10.2"
 
 [[bin]]
 name = "rust"
