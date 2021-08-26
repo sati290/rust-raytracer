@@ -88,7 +88,7 @@ impl<'a> TraceResult<'a> {
 #[derive(Clone, Copy)]
 pub struct TraceResultSimd<'a> {
     hit_dist: f32x4,
-    object: [Option<&'a Sphere>; 4],
+    object: [Option<&'a Triangle>; 4],
 }
 
 impl<'a> TraceResultSimd<'a> {
@@ -99,7 +99,7 @@ impl<'a> TraceResultSimd<'a> {
         }
     }
 
-    fn add_hit(&mut self, hit_dist: f32x4, object: &'a Sphere) {
+    fn add_hit(&mut self, hit_dist: f32x4, object: &'a Triangle) {
         let closest = hit_dist.cmp_lt(self.hit_dist);
         self.hit_dist = self.hit_dist.min(hit_dist);
 
@@ -147,86 +147,6 @@ impl Triangle {
     fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
         None
     }
-}
-
-pub struct Sphere {
-    center: Vec3,
-    centerx4: Vec3x4,
-    radius: f32,
-    radius2: f32,
-    color: Vec3,
-}
-
-impl Sphere {
-    fn new(center: Vec3, radius: f32, color: Vec3) -> Sphere {
-        Sphere {
-            center,
-            centerx4: Vec3x4::splat(center),
-            radius,
-            radius2: radius * radius,
-            color,
-        }
-    }
-
-    fn aabb(&self) -> Aabb {
-        let r = Vec3::broadcast(self.radius);
-        Aabb {
-            min: self.center - r,
-            max: self.center + r,
-        }
-    }
-
-    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
-        let r2 = self.radius2;
-        let l = self.center - *ray_origin;
-        let tca = l.dot(*ray_direction);
-        let d2 = l.dot(l) - tca * tca;
-
-        if d2 > r2 {
-            None
-        } else {
-            let thc = (r2 - d2).sqrt();
-            let t0 = tca - thc;
-            let t1 = tca + thc;
-
-            if t0 > 0. {
-                Some(t0)
-            } else if B && t1 > 0. {
-                Some(t1)
-            } else {
-                None
-            }
-        }
-    }
-
-    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
-        let l = self.centerx4 - *ray_origin;
-        let tca = l.dot(*ray_direction);
-        let d2 = l.dot(l) - tca * tca;
-
-        let sqrt_valid = d2.cmp_lt(self.radius2);
-        if sqrt_valid.any() {
-            let thc = (self.radius2 - d2).sqrt();
-            let t0 = tca - thc;
-            let t0_valid = t0.cmp_gt(0.) & sqrt_valid;
-
-            if B {
-                let t1 = tca + thc;
-                let t1_valid = t1.cmp_gt(0.) & sqrt_valid;
-
-                let t = t1_valid.blend(t1, f32x4::splat(f32::INFINITY));
-                t0_valid.blend(t0, t)
-            } else {
-                t0_valid.blend(t0, f32x4::splat(f32::INFINITY))
-            }
-        } else {
-            f32x4::splat(f32::INFINITY)
-        }
-    }
-}
-
-struct Scene {
-    objects: Vec<Sphere>,
 }
 
 struct RayPacket<'a> {
@@ -286,30 +206,6 @@ fn generate_camera_rays(image_width: u32, image_height: u32, horiz_fog_deg: f32)
     }
 
     rays
-}
-
-fn generate_random_scene() -> Scene {
-    let mut rng = StdRng::seed_from_u64(646524362);
-    let mut scene = Scene {
-        objects: Vec::new(),
-    };
-    for _ in 0..20 {
-        scene.objects.push(Sphere::new(
-            Vec3::new(
-                rng.gen_range(-10.0..10.0),
-                rng.gen_range(-10.0..10.0),
-                rng.gen_range(-10.0..10.0),
-            ),
-            rng.gen_range(0.5..2.0),
-            Vec3::new(
-                rng.gen_range(0.0..1.0),
-                rng.gen_range(0.0..1.0),
-                rng.gen_range(0.0..1.0),
-            ),
-        ));
-    }
-
-    scene
 }
 
 fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
