@@ -140,12 +140,38 @@ impl Triangle {
         (self.verts[0] + self.verts[1] + self.verts[2]) / 3.
     }
 
-    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
-        f32x4::splat(f32::INFINITY)
+    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
+        let v0v1 = self.verts[1] - self.verts[0];
+        let v0v2 = self.verts[2] - self.verts[0];
+        let pvec = ray_direction.cross(v0v2);
+        let det = v0v1.dot(pvec);
+
+        let epsilon = 0.0000001;
+        if det < epsilon {
+            return None;
+        }
+
+        let inv_det = 1./ det;
+
+        let tvec = *ray_origin - self.verts[0];
+        let u = tvec.dot(pvec) * inv_det;
+        if u < 0. || u > 1. {
+            return None;
+        }
+
+        let qvec = tvec.cross(v0v1);
+        let v = ray_direction.dot(qvec) * inv_det;
+        if v < 0. || v > 1. {
+            return None;
+        }
+
+        let t = v0v2.dot(qvec) * inv_det;
+
+        Some(t)
     }
 
-    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
-        None
+    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
+        f32x4::splat(f32::INFINITY)
     }
 }
 
@@ -244,7 +270,8 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
         let hit_pos = cam_posx4 + rays * closest_hit;
 
         let shadow_ray = (light_posx4 - hit_pos).normalized();
-        let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
+        //let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
+        let shadow_hit = 0;
         // packet.shadow_rays_total += 4;
         // packet.shadow_rays_active += closest_hit.cmp_lt(f32::INFINITY).move_mask().count_ones();
 
@@ -272,7 +299,7 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
         for i in 0..4 {
             if let Some(o) = closest_obj[i] {
                 if shadow_hit & 1 << i == 0 {
-                    color += Vec3::one() * ndl[i] / 4.;
+                    color += Vec3::one() /* * ndl[i]*/ / 4.;
                 }
             }
         }
@@ -320,7 +347,7 @@ fn main() {
     let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
-    let cam_pos = Vec3::new(0., 0., -30.);
+    let cam_pos = Vec3::new(0., 0., -4990.);
     let light_pos = Vec3::new(10., 10., -20.);
     let image_width = 1920;
     let image_height = 1080;
@@ -375,7 +402,7 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 100;
+    let frames = 10;
     for _ in 0..frames {
         packets
             .par_iter_mut()
