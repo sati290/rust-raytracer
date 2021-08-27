@@ -299,7 +299,7 @@ fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, li
         for i in 0..4 {
             if let Some(o) = closest_obj[i] {
                 if shadow_hit & 1 << i == 0 {
-                    color += Vec3::one() /* * ndl[i]*/ / 4.;
+                    color += Vec3::one() * ndl[i] / 4.;
                 }
             }
         }
@@ -347,8 +347,8 @@ fn main() {
     let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
-    let cam_pos = Vec3::new(0., 0., -4990.);
-    let light_pos = Vec3::new(10., 10., -20.);
+    let cam_pos = Vec3::new(0., 0., -5500.);
+    let light_pos = Vec3::new(5000., 5000., -10000.);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
