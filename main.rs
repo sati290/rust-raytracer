@@ -1,12 +1,14 @@
 mod aabb;
 mod bvh;
+mod frustum;
 
 use aabb::Aabb;
 use bvh::Bvh;
+use frustum::Frustum;
 use obj::Obj;
 use rayon::prelude::*;
 use std::time::Instant;
-use ultraviolet::{Mat3, Rotor3, Vec2, Vec3, Vec3x4};
+use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4};
 use wide::{f32x4, CmpGe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
@@ -24,39 +26,6 @@ impl Ray {
             origin: *origin,
             direction: *direction,
             direction_recip: Vec3::one() / *direction,
-        }
-    }
-}
-
-pub struct Frustum {
-    normals: [Vec3; 4],
-    offsets: [f32; 4],
-    normals_optimized: [Vec3x4; 2],
-}
-
-impl Frustum {
-    fn from_corner_rays(rays: &[Ray; 4]) -> Self {
-        let mut normals: [Vec3; 4] = Default::default();
-        let mut offsets: [f32; 4] = Default::default();
-
-        for i in 0..4 {
-            normals[i] = rays[i]
-                .direction
-                .cross(rays[(i + 1) % 4].direction)
-                .normalized();
-            offsets[i] = rays[i].origin.dot(normals[i]);
-        }
-
-        let normals_optimized = Vec3x4::from(normals);
-        let normals_optimized = [
-            normals_optimized.max_by_component(Vec3x4::zero()),
-            normals_optimized.min_by_component(Vec3x4::zero()),
-        ];
-
-        Frustum {
-            normals,
-            offsets,
-            normals_optimized,
         }
     }
 }
@@ -177,7 +146,6 @@ struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
     rays: Vec<Ray>,
     frustum: Frustum,
-    corner_rays: [Ray; 4],
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
 }
@@ -205,7 +173,6 @@ impl<'a> RayPacket<'a> {
             pixels,
             rays,
             frustum,
-            corner_rays,
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
         }
@@ -251,7 +218,7 @@ fn trace_packet<'a>(
     packet: &mut RayPacket<'a>,
     bvh: &'a Bvh,
     cam_pos: &Vec3,
-    cam_transform: &Rotor3,
+    cam_transform: &Isometry3,
     light_pos: &Vec3,
 ) {
     let cam_posx4 = Vec3x4::splat(*cam_pos);
@@ -260,17 +227,10 @@ fn trace_packet<'a>(
     let transformed_rays: Vec<_> = packet
         .rays
         .iter()
-        .map(|r| Ray::new(cam_pos, &(*cam_transform * r.direction)))
+        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction)))
         .collect();
 
-    let transformed_corner_rays = [
-        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[0].direction)),
-        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[1].direction)),
-        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[2].direction)),
-        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[3].direction)),
-    ];
-
-    let frustum = Frustum::from_corner_rays(&transformed_corner_rays);
+    let frustum = cam_transform.into_homogeneous_matrix() * packet.frustum;
 
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
@@ -391,14 +351,14 @@ fn main() {
     let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
-    let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 6000.;
+    let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 4500.;
     let cam_target = Vec3::new(0., 500., 0.);
     let light_pos = Vec3::new(5000., 5000., -10000.);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
 
-    let camera_transform = look_at(&cam_pos, &cam_target);
+    let camera_transform = Isometry3::new(cam_pos, look_at(&cam_pos, &cam_target));
 
     let camera_rays = generate_camera_rays(image_width, image_height, 90.);
     let get_camera_ray_index = |x: u32, y: u32| {
