@@ -4,12 +4,10 @@ mod bvh;
 use aabb::Aabb;
 use bvh::Bvh;
 use obj::Obj;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::time::Instant;
-use ultraviolet::{Vec2, Vec3, Vec3x4};
-use wide::{f32x4, CmpGe, CmpGt, CmpLt};
+use ultraviolet::{Mat3, Rotor3, Vec2, Vec3, Vec3x4};
+use wide::{f32x4, CmpGe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
 const PACKET_SIZE: u32 = 16;
@@ -151,17 +149,17 @@ impl Triangle {
             return None;
         }
 
-        let inv_det = 1./ det;
+        let inv_det = 1. / det;
 
         let tvec = *ray_origin - self.verts[0];
         let u = tvec.dot(pvec) * inv_det;
-        if u < 0. || u > 1. {
+        if !(0. ..=1.).contains(&u) {
             return None;
         }
 
         let qvec = tvec.cross(v0v1);
         let v = ray_direction.dot(qvec) * inv_det;
-        if v < 0. || v > 1. {
+        if !(0. ..=1.).contains(&v) {
             return None;
         }
 
@@ -179,20 +177,35 @@ struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
     rays: Vec<Ray>,
     frustum: Frustum,
+    corner_rays: [Ray; 4],
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
 }
 
 impl<'a> RayPacket<'a> {
-    fn new(
-        pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
-        rays: Vec<Ray>,
-        frustum: Frustum,
-    ) -> Self {
+    fn new(pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)], rays: Vec<Ray>) -> Self {
+        let mut min = Vec2::broadcast(f32::INFINITY);
+        let mut max = Vec2::broadcast(f32::NEG_INFINITY);
+        for r in &rays {
+            let uv = r.direction.xy() / r.direction.z;
+            min = min.min_by_component(uv);
+            max = max.max_by_component(uv);
+        }
+
+        let corner_rays = [
+            Ray::new(&Vec3::zero(), &Vec3::new(min.x, min.y, 1.)),
+            Ray::new(&Vec3::zero(), &Vec3::new(min.x, max.y, 1.)),
+            Ray::new(&Vec3::zero(), &Vec3::new(max.x, max.y, 1.)),
+            Ray::new(&Vec3::zero(), &Vec3::new(max.x, min.y, 1.)),
+        ];
+
+        let frustum = Frustum::from_corner_rays(&corner_rays);
+
         RayPacket {
             pixels,
             rays,
             frustum,
+            corner_rays,
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
         }
@@ -234,13 +247,34 @@ fn generate_camera_rays(image_width: u32, image_height: u32, horiz_fog_deg: f32)
     rays
 }
 
-fn trace_packet<'a>(packet: &mut RayPacket<'a>, bvh: &'a Bvh, cam_pos: &Vec3, light_pos: &Vec3) {
+fn trace_packet<'a>(
+    packet: &mut RayPacket<'a>,
+    bvh: &'a Bvh,
+    cam_pos: &Vec3,
+    cam_transform: &Rotor3,
+    light_pos: &Vec3,
+) {
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
+    let transformed_rays: Vec<_> = packet
+        .rays
+        .iter()
+        .map(|r| Ray::new(cam_pos, &(*cam_transform * r.direction)))
+        .collect();
+
+    let transformed_corner_rays = [
+        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[0].direction)),
+        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[1].direction)),
+        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[2].direction)),
+        Ray::new(cam_pos, &(*cam_transform * packet.corner_rays[3].direction)),
+    ];
+
+    let frustum = Frustum::from_corner_rays(&transformed_corner_rays);
+
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
-    bvh.trace_packet(&packet.rays, &packet.frustum, &mut trace_results);
+    bvh.trace_packet(&transformed_rays, &frustum, &mut trace_results);
 
     for ((_x, _y, pixel), (rays, results)) in packet.pixels.iter_mut().zip(
         packet
@@ -314,9 +348,9 @@ fn load_scene() -> Vec<Triangle> {
     let obj = Obj::load("./asian_dragon_obj/asian_dragon.obj").unwrap();
 
     let mut triangles = vec![];
-    for o in obj.data.objects {
-        for g in o.groups {
-            for p in g.polys {
+    for o in &obj.data.objects {
+        for g in &o.groups {
+            triangles.extend(g.polys.iter().map(|p| {
                 if p.0.len() != 3 {
                     panic!();
                 }
@@ -327,8 +361,8 @@ fn load_scene() -> Vec<Triangle> {
                     Vec3::from(obj.data.position[p.0[2].0]),
                 ];
 
-                triangles.push(Triangle::new(verts));
-            }
+                Triangle::new(verts)
+            }));
         }
     }
     let elapsed = load_start.elapsed();
@@ -341,17 +375,30 @@ fn load_scene() -> Vec<Triangle> {
     triangles
 }
 
+fn look_at(eye: &Vec3, target: &Vec3) -> Rotor3 {
+    let at = (*target - *eye).normalized();
+    let up = Vec3::unit_y();
+    let side = up.cross(at);
+    let rup = at.cross(side);
+    let mat = Mat3::new(side, rup, at);
+
+    mat.into_rotor3()
+}
+
 fn main() {
     let triangles = load_scene();
     let bvh_start = Instant::now();
     let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
-    let cam_pos = Vec3::new(0., 0., -5500.);
+    let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 6000.;
+    let cam_target = Vec3::new(0., 500., 0.);
     let light_pos = Vec3::new(5000., 5000., -10000.);
     let image_width = 1920;
     let image_height = 1080;
     let mut image = image::RgbImage::new(image_width, image_height);
+
+    let camera_transform = look_at(&cam_pos, &cam_target);
 
     let camera_rays = generate_camera_rays(image_width, image_height, 90.);
     let get_camera_ray_index = |x: u32, y: u32| {
@@ -369,26 +416,11 @@ fn main() {
             for (x, y, _) in &*pixels {
                 let rays_index = get_camera_ray_index(*x, *y);
                 for i in 0..NUM_SUBSAMPLES {
-                    rays.push(Ray::new(&cam_pos, &camera_rays[rays_index + i]));
+                    rays.push(Ray::new(&Vec3::zero(), &camera_rays[rays_index + i]));
                 }
             }
 
-            let mut min = Vec2::broadcast(f32::INFINITY);
-            let mut max = Vec2::broadcast(f32::NEG_INFINITY);
-            for r in &rays {
-                let uv = r.direction.xy() / r.direction.z;
-                min = min.min_by_component(uv);
-                max = max.max_by_component(uv);
-            }
-
-            let frustum = Frustum::from_corner_rays(&[
-                Ray::new(&cam_pos, &Vec3::new(min.x, min.y, 1.)),
-                Ray::new(&cam_pos, &Vec3::new(min.x, max.y, 1.)),
-                Ray::new(&cam_pos, &Vec3::new(max.x, max.y, 1.)),
-                Ray::new(&cam_pos, &Vec3::new(max.x, min.y, 1.)),
-            ]);
-
-            RayPacket::new(pixels, rays, frustum)
+            RayPacket::new(pixels, rays)
         })
         .collect();
 
@@ -406,7 +438,7 @@ fn main() {
     for _ in 0..frames {
         packets
             .par_iter_mut()
-            .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &light_pos));
+            .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &camera_transform, &light_pos));
     }
 
     let elapsed = time_start.elapsed();
