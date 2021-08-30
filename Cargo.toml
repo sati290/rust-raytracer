@@ -6,12 +6,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-image = "0.23.14"
-rayon = "1.5.1"
-ultraviolet = "0.8.1"
-wide = "0.6.5"
-rand = "0.8.4"
-obj = "0.10.2"
+image = "0.23"
+rayon = "1.5"
+ultraviolet = "0.8"
+wide = "0.6"
+rand = "0.8"
+obj = "0.10"
 
 [[bin]]
 name = "rust"
