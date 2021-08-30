@@ -88,7 +88,7 @@ impl Triangle {
     pub fn new(verts: [Vec3; 3]) -> Self {
         let v0v1 = verts[1] - verts[0];
         let v0v2 = verts[2] - verts[0];
-        let normal = v0v1.cross(v0v2).normalized();
+        let normal = v0v2.cross(v0v1).normalized();
 
         Triangle { verts, normal }
     }
@@ -110,8 +110,8 @@ impl Triangle {
     fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
         let v0v1 = self.verts[1] - self.verts[0];
         let v0v2 = self.verts[2] - self.verts[0];
-        let pvec = ray_direction.cross(v0v2);
-        let det = v0v1.dot(pvec);
+        let pvec = ray_direction.cross(v0v1);
+        let det = v0v2.dot(pvec);
 
         let epsilon = 0.0000001;
         if det < epsilon {
@@ -126,13 +126,13 @@ impl Triangle {
             return None;
         }
 
-        let qvec = tvec.cross(v0v1);
+        let qvec = tvec.cross(v0v2);
         let v = ray_direction.dot(qvec) * inv_det;
         if !(0. ..=1.).contains(&v) {
             return None;
         }
 
-        let t = v0v2.dot(qvec) * inv_det;
+        let t = v0v1.dot(qvec) * inv_det;
 
         Some(t)
     }
@@ -351,8 +351,8 @@ fn main() {
     let bvh = Bvh::build(&triangles);
     println!("bvh build {:.2?}", bvh_start.elapsed());
 
-    let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 4500.;
-    let cam_target = Vec3::new(0., 500., 0.);
+    let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 3000.;
+    let cam_target = Vec3::new(0., 350., 0.);
     let light_pos = Vec3::new(5000., 5000., -10000.);
     let image_width = 1920;
     let image_height = 1080;
@@ -372,13 +372,15 @@ fn main() {
     let mut packets: Vec<_> = pixels
         .chunks_mut((PACKET_SIZE * PACKET_SIZE) as usize)
         .map(|pixels| {
-            let mut rays = Vec::with_capacity(pixels.len() * NUM_SUBSAMPLES);
-            for (x, y, _) in &*pixels {
-                let rays_index = get_camera_ray_index(*x, *y);
-                for i in 0..NUM_SUBSAMPLES {
-                    rays.push(Ray::new(&Vec3::zero(), &camera_rays[rays_index + i]));
-                }
-            }
+            let rays = pixels
+                .iter()
+                .flat_map(|(x, y, _)| {
+                    let camera_rays = &camera_rays;
+                    let rays_index = get_camera_ray_index(*x, *y);
+                    (0..NUM_SUBSAMPLES)
+                        .map(move |i| Ray::new(&Vec3::zero(), &camera_rays[rays_index + i]))
+                })
+                .collect();
 
             RayPacket::new(pixels, rays)
         })
@@ -394,7 +396,7 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 10;
+    let frames = 1;
     for _ in 0..frames {
         packets
             .par_iter_mut()
