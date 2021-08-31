@@ -417,7 +417,7 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 1;
+    let frames = 5;
     for _ in 0..frames {
         packets
             .par_iter_mut()

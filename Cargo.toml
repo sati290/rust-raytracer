@@ -12,6 +12,7 @@ ultraviolet = "0.8"
 wide = "0.6"
 rand = "0.8"
 obj = "0.10"
+arrayvec = "0.7"
 
 [[bin]]
 name = "rust"

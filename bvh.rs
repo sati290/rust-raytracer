@@ -2,6 +2,7 @@ use crate::aabb::Aabb;
 use crate::Vec3;
 use crate::Vec3x4;
 use crate::{Frustum, Ray, TraceResult, Triangle};
+use arrayvec::ArrayVec;
 use wide::CmpLt;
 
 enum BvhNode {
@@ -48,39 +49,6 @@ impl BvhNode {
         }
 
         None
-    }
-}
-
-struct BvhNodeStack<T> {
-    stack: [Option<T>; 32],
-    size: usize,
-}
-
-impl<T> BvhNodeStack<T> {
-    fn new() -> Self {
-        BvhNodeStack {
-            stack: Default::default(),
-            size: 0,
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.size
-    }
-
-    fn push(&mut self, entry: T) {
-        self.stack[self.size] = Some(entry);
-        self.size += 1;
-    }
-
-    #[must_use]
-    fn pop(&mut self) -> Option<T> {
-        if self.size > 0 {
-            self.size -= 1;
-            self.stack[self.size].take()
-        } else {
-            None
-        }
     }
 }
 
@@ -202,7 +170,7 @@ impl Bvh<'_> {
     pub fn trace_shadow(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, ray_mask: i32) -> i32 {
         let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
         let mut result = !ray_mask;
-        let mut stack = BvhNodeStack::new();
+        let mut stack = ArrayVec::<_, 32>::new();
 
         stack.push(&self.root_node);
         while let Some(node) = stack.pop() {
@@ -248,7 +216,7 @@ impl Bvh<'_> {
         frustum: &Frustum,
         results: &mut [TraceResult<'a>],
     ) {
-        let mut stack = BvhNodeStack::new();
+        let mut stack = ArrayVec::<_, 32>::new();
 
         stack.push((&self.root_node, 0));
         while let Some((node, first_active_ray)) = stack.pop() {
