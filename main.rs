@@ -3,7 +3,7 @@ mod bvh;
 mod frustum;
 
 use aabb::Aabb;
-use bvh::Bvh;
+use bvh::{Bvh, TraceStats};
 use frustum::Frustum;
 use obj::Obj;
 use rayon::prelude::*;
@@ -167,6 +167,7 @@ struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
     rays: Vec<Ray>,
     frustum: Frustum,
+    trace_stats: TraceStats,
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
 }
@@ -194,6 +195,7 @@ impl<'a> RayPacket<'a> {
             pixels,
             rays,
             frustum,
+            trace_stats: TraceStats::new(),
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
         }
@@ -255,7 +257,12 @@ fn trace_packet<'a>(
 
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
-    bvh.trace_packet(&transformed_rays, &frustum, &mut trace_results);
+    bvh.trace_packet(
+        &transformed_rays,
+        &frustum,
+        &mut trace_results,
+        &mut packet.trace_stats,
+    );
 
     for ((_x, _y, pixel), (rays, results)) in packet.pixels.iter_mut().zip(
         packet
@@ -435,6 +442,10 @@ fn main() {
     // let shadow_rays_total = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_total);
     // let shadow_rays_active = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_active);
     // println!("shadow trace simd utilization {}%", shadow_rays_active as f32 / shadow_rays_total as f32 * 100.);
+    let trace_stats = packets
+        .iter()
+        .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
+    println!("{:?}", trace_stats);
 
     image.save("output.png").unwrap();
 }

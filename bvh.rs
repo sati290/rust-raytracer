@@ -1,9 +1,43 @@
+use std::ops::Add;
+
 use crate::aabb::Aabb;
 use crate::Vec3;
 use crate::Vec3x4;
 use crate::{Frustum, Ray, TraceResult, Triangle};
 use arrayvec::ArrayVec;
 use wide::CmpLt;
+
+#[derive(Clone, Copy, Debug)]
+pub struct TraceStats {
+    inner_visit: u32,
+    leaf_visit: u32,
+    obj_intersect: u32,
+    obj_intersect_skipped: u32,
+}
+
+impl TraceStats {
+    pub fn new() -> Self {
+        TraceStats {
+            inner_visit: 0,
+            leaf_visit: 0,
+            obj_intersect: 0,
+            obj_intersect_skipped: 0,
+        }
+    }
+}
+
+impl Add for TraceStats {
+    type Output = TraceStats;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        TraceStats {
+            inner_visit: self.inner_visit + rhs.inner_visit,
+            leaf_visit: self.leaf_visit + rhs.leaf_visit,
+            obj_intersect: self.obj_intersect + rhs.obj_intersect,
+            obj_intersect_skipped: self.obj_intersect_skipped + rhs.obj_intersect_skipped,
+        }
+    }
+}
 
 enum BvhNode {
     Inner {
@@ -215,6 +249,7 @@ impl Bvh<'_> {
         rays: &[Ray],
         frustum: &Frustum,
         results: &mut [TraceResult<'a>],
+        stats: &mut TraceStats,
     ) {
         let mut stack = ArrayVec::<_, 32>::new();
 
@@ -225,6 +260,8 @@ impl Bvh<'_> {
                     child_bbox,
                     children,
                 } => {
+                    stats.inner_visit += 1;
+
                     if let Some(i) =
                         BvhNode::intersect_packet(&child_bbox[0], rays, first_active_ray, frustum)
                     {
@@ -237,13 +274,32 @@ impl Bvh<'_> {
                     };
                 }
                 BvhNode::Leaf { object } => {
-                    for (ray, result) in rays[first_active_ray..]
-                        .iter()
-                        .zip(&mut results[first_active_ray..])
-                    {
-                        let hit =
-                            self.objects[*object].intersect::<false>(&ray.origin, &ray.direction);
-                        if let Some(hit) = hit {
+                    stats.leaf_visit += 1;
+                    stats.obj_intersect += (rays.len() - first_active_ray) as u32;
+                    stats.obj_intersect_skipped += first_active_ray as u32;
+
+                    let active_rays = &rays[first_active_ray..];
+                    let active_results = &mut results[first_active_ray..];
+
+                    for (rays, results) in active_rays.chunks(4).zip(active_results.chunks_mut(4)) {
+                        let ray_origins = Vec3x4::from([
+                            rays.get(0).map_or(Vec3::zero(), |r| r.origin),
+                            rays.get(1).map_or(Vec3::zero(), |r| r.origin),
+                            rays.get(2).map_or(Vec3::zero(), |r| r.origin),
+                            rays.get(3).map_or(Vec3::zero(), |r| r.origin),
+                        ]);
+                        let ray_directions = Vec3x4::from([
+                            rays.get(0).map_or(Vec3::zero(), |r| r.direction),
+                            rays.get(1).map_or(Vec3::zero(), |r| r.direction),
+                            rays.get(2).map_or(Vec3::zero(), |r| r.direction),
+                            rays.get(3).map_or(Vec3::zero(), |r| r.direction),
+                        ]);
+
+                        let hit = self.objects[*object]
+                            .intersect_simd::<false>(&ray_origins, &ray_directions);
+
+                        let hit: [f32; 4] = hit.into();
+                        for (result, hit) in results.iter_mut().zip(hit) {
                             result.add_hit(hit, &self.objects[*object]);
                         }
                     }
