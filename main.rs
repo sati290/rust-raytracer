@@ -265,8 +265,7 @@ fn trace_packet<'a>(
     );
 
     for ((_x, _y, pixel), (rays, results)) in packet.pixels.iter_mut().zip(
-        packet
-            .rays
+        transformed_rays
             .chunks_exact(NUM_SUBSAMPLES)
             .zip(trace_results.chunks_exact(NUM_SUBSAMPLES)),
     ) {
@@ -292,8 +291,7 @@ fn trace_packet<'a>(
         let hit_pos = cam_posx4 + rays * closest_hit;
 
         let shadow_ray = (light_posx4 - hit_pos).normalized();
-        //let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
-        let shadow_hit = 0;
+        let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
         // packet.shadow_rays_total += 4;
         // packet.shadow_rays_active += closest_hit.cmp_lt(f32::INFINITY).move_mask().count_ones();
 
