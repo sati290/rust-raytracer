@@ -3,7 +3,7 @@ use std::ops::Add;
 use crate::aabb::Aabb;
 use crate::Vec3;
 use crate::Vec3x4;
-use crate::{Frustum, Ray, TraceResult, Triangle};
+use crate::{Ray, TraceResult, Triangle};
 use arrayvec::ArrayVec;
 use wide::CmpLt;
 
@@ -47,43 +47,6 @@ enum BvhNode {
     Leaf {
         object: usize,
     },
-}
-
-impl BvhNode {
-    fn intersect_packet(
-        bbox: &Aabb,
-        rays: &[Ray],
-        first_active_ray: usize,
-        frustum: &Frustum,
-    ) -> Option<usize> {
-        let rays = &rays[first_active_ray..];
-        if bbox.intersect(&rays[0].origin, &rays[0].direction_recip) {
-            return Some(first_active_ray);
-        }
-
-        if bbox.intersect_frustum(frustum) {
-            for (i, c) in rays.chunks_exact(4).enumerate() {
-                let origins = Vec3x4::from([c[0].origin, c[1].origin, c[2].origin, c[3].origin]);
-                let directions_recip = Vec3x4::from([
-                    c[0].direction_recip,
-                    c[1].direction_recip,
-                    c[2].direction_recip,
-                    c[3].direction_recip,
-                ]);
-                if bbox.intersect_simd(&origins, &directions_recip).any() {
-                    return Some(first_active_ray + i * 4);
-                }
-            }
-
-            for (i, r) in rays.chunks_exact(4).remainder().iter().enumerate() {
-                if bbox.intersect(&r.origin, &r.direction_recip) {
-                    return Some(first_active_ray + rays.len() / 4 * 4 + i);
-                }
-            }
-        }
-
-        None
-    }
 }
 
 pub struct Bvh<'a> {
@@ -247,7 +210,6 @@ impl Bvh<'_> {
     pub fn trace_stream<'a>(
         &'a self,
         rays: &[Ray],
-        frustum: &Frustum,
         results: &mut [TraceResult<'a>],
         stats: &mut TraceStats,
     ) {
@@ -370,70 +332,6 @@ impl Bvh<'_> {
                         let hit: [f32; 4] = hit.into();
                         for (&i, hit) in ray_indices.iter().zip(hit) {
                             results[i].add_hit(hit, &self.objects[*object]);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn trace_packet<'a>(
-        &'a self,
-        rays: &[Ray],
-        frustum: &Frustum,
-        results: &mut [TraceResult<'a>],
-        stats: &mut TraceStats,
-    ) {
-        let mut stack = ArrayVec::<_, 32>::new();
-
-        stack.push((&self.root_node, 0));
-        while let Some((node, first_active_ray)) = stack.pop() {
-            match node {
-                BvhNode::Inner {
-                    child_bbox,
-                    children,
-                } => {
-                    stats.inner_visit += 1;
-
-                    if let Some(i) =
-                        BvhNode::intersect_packet(&child_bbox[0], rays, first_active_ray, frustum)
-                    {
-                        stack.push((&children[0], i))
-                    };
-                    if let Some(i) =
-                        BvhNode::intersect_packet(&child_bbox[1], rays, first_active_ray, frustum)
-                    {
-                        stack.push((&children[1], i))
-                    };
-                }
-                BvhNode::Leaf { object } => {
-                    stats.leaf_visit += 1;
-                    stats.obj_intersect += (rays.len() - first_active_ray) as u32;
-                    stats.obj_intersect_skipped += first_active_ray as u32;
-
-                    let active_rays = &rays[first_active_ray..];
-                    let active_results = &mut results[first_active_ray..];
-
-                    for (rays, results) in active_rays.chunks(4).zip(active_results.chunks_mut(4)) {
-                        let ray_origins = Vec3x4::from([
-                            rays.get(0).map_or(Vec3::zero(), |r| r.origin),
-                            rays.get(1).map_or(Vec3::zero(), |r| r.origin),
-                            rays.get(2).map_or(Vec3::zero(), |r| r.origin),
-                            rays.get(3).map_or(Vec3::zero(), |r| r.origin),
-                        ]);
-                        let ray_directions = Vec3x4::from([
-                            rays.get(0).map_or(Vec3::zero(), |r| r.direction),
-                            rays.get(1).map_or(Vec3::zero(), |r| r.direction),
-                            rays.get(2).map_or(Vec3::zero(), |r| r.direction),
-                            rays.get(3).map_or(Vec3::zero(), |r| r.direction),
-                        ]);
-
-                        let hit = self.objects[*object]
-                            .intersect_simd::<false>(&ray_origins, &ray_directions);
-
-                        let hit: [f32; 4] = hit.into();
-                        for (result, hit) in results.iter_mut().zip(hit) {
-                            result.add_hit(hit, &self.objects[*object]);
                         }
                     }
                 }

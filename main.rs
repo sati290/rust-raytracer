@@ -259,7 +259,6 @@ fn trace_packet<'a>(
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
     bvh.trace_stream(
         &transformed_rays,
-        &frustum,
         &mut trace_results,
         &mut packet.trace_stats,
     );
