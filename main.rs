@@ -12,7 +12,7 @@ use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4};
 use wide::{f32x4, CmpGe, CmpLe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
-const PACKET_SIZE: u32 = 16;
+const PACKET_SIZE: u32 = 32;
 
 pub struct Ray {
     origin: Vec3,
