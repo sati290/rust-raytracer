@@ -244,6 +244,139 @@ impl Bvh<'_> {
         result
     }
 
+    pub fn trace_stream<'a>(
+        &'a self,
+        rays: &[Ray],
+        frustum: &Frustum,
+        results: &mut [TraceResult<'a>],
+        stats: &mut TraceStats,
+    ) {
+        let mut stack = ArrayVec::<_, 32>::new();
+        let mut ray_lists = [
+            vec![0; rays.len() * 32],
+            vec![0; rays.len() * 32],
+            vec![0; rays.len() * 32],
+        ];
+        let mut ray_list_sizes = [0; 3];
+
+        for i in 0..rays.len() {
+            ray_lists[0][i] = i;
+        }
+        ray_list_sizes[0] = rays.len();
+        stack.push((&self.root_node, 0, 0));
+
+        while let Some((node, list_idx, start_idx)) = stack.pop() {
+            let mut active_ray_idx = start_idx;
+            let last_active_ray_idx = ray_list_sizes[list_idx];
+
+            ray_list_sizes[list_idx] = start_idx;
+
+            match node {
+                BvhNode::Inner {
+                    child_bbox,
+                    children,
+                } => {
+                    let ray_list_sizes_orig = ray_list_sizes;
+                    while active_ray_idx < last_active_ray_idx {
+                        let ray_indices = [
+                            Some(ray_lists[list_idx][active_ray_idx]),
+                            if active_ray_idx + 1 < last_active_ray_idx {
+                                Some(ray_lists[list_idx][active_ray_idx + 1])
+                            } else {
+                                None
+                            },
+                            if active_ray_idx + 2 < last_active_ray_idx {
+                                Some(ray_lists[list_idx][active_ray_idx + 2])
+                            } else {
+                                None
+                            },
+                            if active_ray_idx + 3 < last_active_ray_idx {
+                                Some(ray_lists[list_idx][active_ray_idx + 3])
+                            } else {
+                                None
+                            },
+                        ];
+                        let origins = Vec3x4::from([
+                            ray_indices[0].map_or(Vec3::zero(), |i| rays[i].origin),
+                            ray_indices[1].map_or(Vec3::zero(), |i| rays[i].origin),
+                            ray_indices[2].map_or(Vec3::zero(), |i| rays[i].origin),
+                            ray_indices[3].map_or(Vec3::zero(), |i| rays[i].origin),
+                        ]);
+                        let directions_recip = Vec3x4::from([
+                            ray_indices[0].map_or(Vec3::zero(), |i| rays[i].direction_recip),
+                            ray_indices[1].map_or(Vec3::zero(), |i| rays[i].direction_recip),
+                            ray_indices[2].map_or(Vec3::zero(), |i| rays[i].direction_recip),
+                            ray_indices[3].map_or(Vec3::zero(), |i| rays[i].direction_recip),
+                        ]);
+
+                        let hit_left = child_bbox[0]
+                            .intersect_simd(&origins, &directions_recip)
+                            .move_mask();
+                        let hit_right = child_bbox[1]
+                            .intersect_simd(&origins, &directions_recip)
+                            .move_mask();
+                        for (i, ray_idx) in ray_indices.iter().enumerate() {
+                            if let Some(ray_idx) = ray_idx {
+                                if hit_left & 1 << i != 0 {
+                                    ray_lists[0][ray_list_sizes[0]] = *ray_idx;
+                                    ray_list_sizes[0] += 1;
+                                }
+                                if hit_right & 1 << i != 0 {
+                                    ray_lists[1][ray_list_sizes[1]] = *ray_idx;
+                                    ray_list_sizes[1] += 1;
+                                }
+                            }
+                        }
+
+                        active_ray_idx += 4;
+                    }
+
+                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
+                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
+                    }
+
+                    if ray_list_sizes[1] - ray_list_sizes_orig[1] > 0 {
+                        stack.push((&children[1], 1, ray_list_sizes_orig[1]));
+                    }
+                }
+                BvhNode::Leaf { object } => {
+                    for ray_indices in
+                        ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
+                    {
+                        let ray_origins = Vec3x4::from([
+                            ray_indices.get(0).map_or(Vec3::zero(), |i| rays[*i].origin),
+                            ray_indices.get(1).map_or(Vec3::zero(), |i| rays[*i].origin),
+                            ray_indices.get(2).map_or(Vec3::zero(), |i| rays[*i].origin),
+                            ray_indices.get(3).map_or(Vec3::zero(), |i| rays[*i].origin),
+                        ]);
+                        let ray_directions = Vec3x4::from([
+                            ray_indices
+                                .get(0)
+                                .map_or(Vec3::zero(), |i| rays[*i].direction),
+                            ray_indices
+                                .get(1)
+                                .map_or(Vec3::zero(), |i| rays[*i].direction),
+                            ray_indices
+                                .get(2)
+                                .map_or(Vec3::zero(), |i| rays[*i].direction),
+                            ray_indices
+                                .get(3)
+                                .map_or(Vec3::zero(), |i| rays[*i].direction),
+                        ]);
+
+                        let hit = self.objects[*object]
+                            .intersect_simd::<false>(&ray_origins, &ray_directions);
+
+                        let hit: [f32; 4] = hit.into();
+                        for (&i, hit) in ray_indices.iter().zip(hit) {
+                            results[i].add_hit(hit, &self.objects[*object]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn trace_packet<'a>(
         &'a self,
         rays: &[Ray],

@@ -257,7 +257,7 @@ fn trace_packet<'a>(
 
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
-    bvh.trace_packet(
+    bvh.trace_stream(
         &transformed_rays,
         &frustum,
         &mut trace_results,
@@ -424,10 +424,10 @@ fn main() {
 
     let time_start = Instant::now();
 
-    let frames = 5;
+    let frames = 20;
     for _ in 0..frames {
         packets
-            .par_iter_mut()
+            .iter_mut()
             .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &camera_transform, &light_pos));
     }
 
