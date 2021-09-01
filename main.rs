@@ -427,7 +427,7 @@ fn main() {
     let frames = 20;
     for _ in 0..frames {
         packets
-            .iter_mut()
+            .par_iter_mut()
             .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &camera_transform, &light_pos));
     }
 
