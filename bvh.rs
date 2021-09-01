@@ -238,6 +238,8 @@ impl Bvh<'_> {
                     child_bbox,
                     children,
                 } => {
+                    stats.inner_visit += 1;
+
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
                         let ray_indices = [
@@ -302,6 +304,10 @@ impl Bvh<'_> {
                     }
                 }
                 BvhNode::Leaf { object } => {
+                    stats.leaf_visit += 1;
+                    stats.obj_intersect += (last_active_ray_idx - active_ray_idx) as u32;
+                    stats.obj_intersect_skipped += stats.obj_intersect - rays.len() as u32;
+
                     for ray_indices in
                         ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
                     {
