@@ -243,34 +243,34 @@ impl Bvh<'_> {
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
                         let ray_indices = [
-                            Some(ray_lists[list_idx][active_ray_idx]),
+                            ray_lists[list_idx][active_ray_idx],
                             if active_ray_idx + 1 < last_active_ray_idx {
-                                Some(ray_lists[list_idx][active_ray_idx + 1])
+                                ray_lists[list_idx][active_ray_idx + 1]
                             } else {
-                                None
+                                ray_lists[list_idx][active_ray_idx]
                             },
                             if active_ray_idx + 2 < last_active_ray_idx {
-                                Some(ray_lists[list_idx][active_ray_idx + 2])
+                                ray_lists[list_idx][active_ray_idx + 2]
                             } else {
-                                None
+                                ray_lists[list_idx][active_ray_idx]
                             },
                             if active_ray_idx + 3 < last_active_ray_idx {
-                                Some(ray_lists[list_idx][active_ray_idx + 3])
+                                ray_lists[list_idx][active_ray_idx + 3]
                             } else {
-                                None
+                                ray_lists[list_idx][active_ray_idx]
                             },
                         ];
                         let origins = Vec3x4::from([
-                            ray_indices[0].map_or(Vec3::zero(), |i| rays[i].origin),
-                            ray_indices[1].map_or(Vec3::zero(), |i| rays[i].origin),
-                            ray_indices[2].map_or(Vec3::zero(), |i| rays[i].origin),
-                            ray_indices[3].map_or(Vec3::zero(), |i| rays[i].origin),
+                            rays[ray_indices[0]].origin,
+                            rays[ray_indices[1]].origin,
+                            rays[ray_indices[2]].origin,
+                            rays[ray_indices[3]].origin,
                         ]);
                         let directions_recip = Vec3x4::from([
-                            ray_indices[0].map_or(Vec3::zero(), |i| rays[i].direction_recip),
-                            ray_indices[1].map_or(Vec3::zero(), |i| rays[i].direction_recip),
-                            ray_indices[2].map_or(Vec3::zero(), |i| rays[i].direction_recip),
-                            ray_indices[3].map_or(Vec3::zero(), |i| rays[i].direction_recip),
+                            rays[ray_indices[0]].direction_recip,
+                            rays[ray_indices[1]].direction_recip,
+                            rays[ray_indices[2]].direction_recip,
+                            rays[ray_indices[3]].direction_recip,
                         ]);
 
                         let hit_left = child_bbox[0]
@@ -279,16 +279,18 @@ impl Bvh<'_> {
                         let hit_right = child_bbox[1]
                             .intersect_simd(&origins, &directions_recip)
                             .move_mask();
-                        for (i, ray_idx) in ray_indices.iter().enumerate() {
-                            if let Some(ray_idx) = ray_idx {
-                                if hit_left & 1 << i != 0 {
-                                    ray_lists[0][ray_list_sizes[0]] = *ray_idx;
-                                    ray_list_sizes[0] += 1;
-                                }
-                                if hit_right & 1 << i != 0 {
-                                    ray_lists[1][ray_list_sizes[1]] = *ray_idx;
-                                    ray_list_sizes[1] += 1;
-                                }
+                        for (i, ray_idx) in ray_indices
+                            .iter()
+                            .enumerate()
+                            .take(last_active_ray_idx - active_ray_idx)
+                        {
+                            if hit_left & 1 << i != 0 {
+                                ray_lists[0][ray_list_sizes[0]] = *ray_idx;
+                                ray_list_sizes[0] += 1;
+                            }
+                            if hit_right & 1 << i != 0 {
+                                ray_lists[1][ray_list_sizes[1]] = *ray_idx;
+                                ray_list_sizes[1] += 1;
                             }
                         }
 
@@ -311,25 +313,23 @@ impl Bvh<'_> {
                     for ray_indices in
                         ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
                     {
+                        let ray_indices_padded = [
+                            ray_indices[0],
+                            *ray_indices.get(1).unwrap_or(&ray_indices[0]),
+                            *ray_indices.get(2).unwrap_or(&ray_indices[0]),
+                            *ray_indices.get(3).unwrap_or(&ray_indices[0]),
+                        ];
                         let ray_origins = Vec3x4::from([
-                            ray_indices.get(0).map_or(Vec3::zero(), |i| rays[*i].origin),
-                            ray_indices.get(1).map_or(Vec3::zero(), |i| rays[*i].origin),
-                            ray_indices.get(2).map_or(Vec3::zero(), |i| rays[*i].origin),
-                            ray_indices.get(3).map_or(Vec3::zero(), |i| rays[*i].origin),
+                            rays[ray_indices_padded[0]].origin,
+                            rays[ray_indices_padded[1]].origin,
+                            rays[ray_indices_padded[2]].origin,
+                            rays[ray_indices_padded[3]].origin,
                         ]);
                         let ray_directions = Vec3x4::from([
-                            ray_indices
-                                .get(0)
-                                .map_or(Vec3::zero(), |i| rays[*i].direction),
-                            ray_indices
-                                .get(1)
-                                .map_or(Vec3::zero(), |i| rays[*i].direction),
-                            ray_indices
-                                .get(2)
-                                .map_or(Vec3::zero(), |i| rays[*i].direction),
-                            ray_indices
-                                .get(3)
-                                .map_or(Vec3::zero(), |i| rays[*i].direction),
+                            rays[ray_indices_padded[0]].direction,
+                            rays[ray_indices_padded[1]].direction,
+                            rays[ray_indices_padded[2]].direction,
+                            rays[ray_indices_padded[3]].direction,
                         ]);
 
                         let hit = self.objects[*object]
