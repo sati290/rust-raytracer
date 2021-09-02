@@ -88,20 +88,22 @@ impl Aabb {
 
     #[must_use]
     pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
-        let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
-        let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
+        let origin_dir_recip = *ray_origin * *ray_direction_recip;
+
+        let tx1 = f32x4::splat(self.min.x).mul_sub(ray_direction_recip.x, origin_dir_recip.x);
+        let tx2 = f32x4::splat(self.max.x).mul_sub(ray_direction_recip.x, origin_dir_recip.x);
 
         let tmin = tx1.min(tx2);
         let tmax = tx1.max(tx2);
 
-        let ty1 = (self.min.y - ray_origin.y) * ray_direction_recip.y;
-        let ty2 = (self.max.y - ray_origin.y) * ray_direction_recip.y;
+        let ty1 = f32x4::splat(self.min.y).mul_sub(ray_direction_recip.y, origin_dir_recip.y);
+        let ty2 = f32x4::splat(self.max.y).mul_sub(ray_direction_recip.y, origin_dir_recip.y);
 
         let tmin = tmin.max(ty1.min(ty2));
         let tmax = tmax.min(ty1.max(ty2));
 
-        let tz1 = (self.min.z - ray_origin.z) * ray_direction_recip.z;
-        let tz2 = (self.max.z - ray_origin.z) * ray_direction_recip.z;
+        let tz1 = f32x4::splat(self.min.z).mul_sub(ray_direction_recip.z, origin_dir_recip.z);
+        let tz2 = f32x4::splat(self.max.z).mul_sub(ray_direction_recip.z, origin_dir_recip.z);
 
         let tmin = tmin.max(tz1.min(tz2));
         let tmax = tmax.min(tz1.max(tz2));
