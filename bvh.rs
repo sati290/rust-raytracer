@@ -222,7 +222,7 @@ impl Bvh<'_> {
         let mut ray_list_sizes = [0; 3];
 
         for i in 0..rays.len() {
-            ray_lists[0][i] = i;
+            ray_lists[0][i] = i as u16;
         }
         ray_list_sizes[0] = rays.len();
         stack.push((&self.root_node, 0, 0));
@@ -243,22 +243,22 @@ impl Bvh<'_> {
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
                         let ray_indices = [
-                            ray_lists[list_idx][active_ray_idx],
+                            ray_lists[list_idx][active_ray_idx] as usize,
                             if active_ray_idx + 1 < last_active_ray_idx {
                                 ray_lists[list_idx][active_ray_idx + 1]
                             } else {
                                 ray_lists[list_idx][active_ray_idx]
-                            },
+                            } as usize,
                             if active_ray_idx + 2 < last_active_ray_idx {
                                 ray_lists[list_idx][active_ray_idx + 2]
                             } else {
                                 ray_lists[list_idx][active_ray_idx]
-                            },
+                            } as usize,
                             if active_ray_idx + 3 < last_active_ray_idx {
                                 ray_lists[list_idx][active_ray_idx + 3]
                             } else {
                                 ray_lists[list_idx][active_ray_idx]
-                            },
+                            } as usize,
                         ];
                         let origins = Vec3x4::from([
                             rays[ray_indices[0]].origin,
@@ -285,11 +285,11 @@ impl Bvh<'_> {
                             .take(last_active_ray_idx - active_ray_idx)
                         {
                             if hit_left & 1 << i != 0 {
-                                ray_lists[0][ray_list_sizes[0]] = *ray_idx;
+                                ray_lists[0][ray_list_sizes[0]] = *ray_idx as u16;
                                 ray_list_sizes[0] += 1;
                             }
                             if hit_right & 1 << i != 0 {
-                                ray_lists[1][ray_list_sizes[1]] = *ray_idx;
+                                ray_lists[1][ray_list_sizes[1]] = *ray_idx as u16;
                                 ray_list_sizes[1] += 1;
                             }
                         }
@@ -314,10 +314,10 @@ impl Bvh<'_> {
                         ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
                     {
                         let ray_indices_padded = [
-                            ray_indices[0],
-                            *ray_indices.get(1).unwrap_or(&ray_indices[0]),
-                            *ray_indices.get(2).unwrap_or(&ray_indices[0]),
-                            *ray_indices.get(3).unwrap_or(&ray_indices[0]),
+                            ray_indices[0] as usize,
+                            *ray_indices.get(1).unwrap_or(&ray_indices[0]) as usize,
+                            *ray_indices.get(2).unwrap_or(&ray_indices[0]) as usize,
+                            *ray_indices.get(3).unwrap_or(&ray_indices[0]) as usize,
                         ];
                         let ray_origins = Vec3x4::from([
                             rays[ray_indices_padded[0]].origin,
@@ -337,7 +337,7 @@ impl Bvh<'_> {
 
                         let hit: [f32; 4] = hit.into();
                         for (&i, hit) in ray_indices.iter().zip(hit) {
-                            results[i].add_hit(hit, &self.objects[*object]);
+                            results[i as usize].add_hit(hit, &self.objects[*object]);
                         }
                     }
                 }
