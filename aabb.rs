@@ -1,9 +1,7 @@
 use crate::f32x4;
 use crate::CmpGe;
-use crate::Frustum;
 use crate::Vec3;
 use crate::Vec3x4;
-use wide::CmpGt;
 
 #[derive(Clone, Copy)]
 pub struct Aabb {
@@ -109,20 +107,5 @@ impl Aabb {
         let tmax = tmax.min(tz1.max(tz2));
 
         tmax.cmp_ge(tmin.max(f32x4::ZERO))
-    }
-
-    #[must_use]
-    pub fn intersect_frustum(&self, frustum: &Frustum) -> bool {
-        let bmin = Vec3x4::splat(self.min);
-        let bmax = Vec3x4::splat(self.max);
-
-        let mut nplane =
-            (frustum.normals_optimized[0].x * bmin.x) + (frustum.normals_optimized[1].x * bmax.x);
-        nplane +=
-            (frustum.normals_optimized[0].y * bmin.y) + (frustum.normals_optimized[1].y * bmax.y);
-        nplane +=
-            (frustum.normals_optimized[0].z * bmin.z) + (frustum.normals_optimized[1].z * bmax.z);
-
-        nplane.cmp_gt(f32x4::from(frustum.offsets)).none()
     }
 }

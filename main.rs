@@ -1,10 +1,8 @@
 mod aabb;
 mod bvh;
-mod frustum;
 
 use aabb::Aabb;
 use bvh::{Bvh, TraceStats};
-use frustum::Frustum;
 use obj::Obj;
 use rayon::prelude::*;
 use std::time::Instant;
@@ -166,7 +164,6 @@ impl Triangle {
 struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
     rays: Vec<Ray>,
-    frustum: Frustum,
     trace_stats: TraceStats,
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
@@ -182,19 +179,9 @@ impl<'a> RayPacket<'a> {
             max = max.max_by_component(uv);
         }
 
-        let corner_rays = [
-            Ray::new(&Vec3::zero(), &Vec3::new(min.x, min.y, 1.)),
-            Ray::new(&Vec3::zero(), &Vec3::new(min.x, max.y, 1.)),
-            Ray::new(&Vec3::zero(), &Vec3::new(max.x, max.y, 1.)),
-            Ray::new(&Vec3::zero(), &Vec3::new(max.x, min.y, 1.)),
-        ];
-
-        let frustum = Frustum::from_corner_rays(&corner_rays);
-
         RayPacket {
             pixels,
             rays,
-            frustum,
             trace_stats: TraceStats::new(),
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
@@ -252,8 +239,6 @@ fn trace_packet<'a>(
         .iter()
         .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction)))
         .collect();
-
-    let frustum = cam_transform.into_homogeneous_matrix() * packet.frustum;
 
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
