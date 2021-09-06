@@ -1,4 +1,5 @@
 use std::ops::Add;
+use std::ops::Range;
 
 use crate::aabb::Aabb;
 use crate::Vec3;
@@ -45,33 +46,37 @@ enum BvhNode {
         children: [Box<BvhNode>; 2],
     },
     Leaf {
-        object: usize,
+        objects: Range<usize>,
     },
 }
 
 pub struct Bvh<'a> {
     objects: &'a [Triangle],
+    object_indices: Vec<usize>,
     root_node: BvhNode,
 }
 
 impl Bvh<'_> {
     pub fn build(objects: &[Triangle]) -> Bvh {
-        let mut indices: Vec<_> = (0..objects.len()).collect();
+        let mut object_indices: Vec<_> = (0..objects.len()).collect();
         let object_bounds: Vec<_> = objects.iter().map(|o| (o.centroid(), o.aabb())).collect();
-        let root_node = Bvh::build_recursive(&mut indices, &object_bounds);
+        let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds);
 
-        Bvh { objects, root_node }
+        Bvh {
+            objects,
+            object_indices,
+            root_node,
+        }
     }
 
-    fn build_recursive(indices: &mut [usize], object_bounds: &[(Vec3, Aabb)]) -> BvhNode {
+    fn build_recursive(
+        indices: &mut [usize],
+        indices_start_idx: usize,
+        object_bounds: &[(Vec3, Aabb)],
+    ) -> BvhNode {
         match indices.len() {
-            1 => BvhNode::Leaf { object: indices[0] },
-            2 => BvhNode::Inner {
-                child_bbox: [object_bounds[indices[0]].1, object_bounds[indices[1]].1],
-                children: [
-                    Box::new(BvhNode::Leaf { object: indices[0] }),
-                    Box::new(BvhNode::Leaf { object: indices[1] }),
-                ],
+            1..=8 => BvhNode::Leaf {
+                objects: indices_start_idx..indices_start_idx + indices.len(),
             },
             _ => {
                 let mut bounds = Aabb::empty();
@@ -153,8 +158,13 @@ impl Bvh<'_> {
                 let split_idx = left;
                 let (indices_left, indices_right) = indices.split_at_mut(split_idx);
 
-                let child_left = Bvh::build_recursive(indices_left, object_bounds);
-                let child_right = Bvh::build_recursive(indices_right, object_bounds);
+                let child_left =
+                    Bvh::build_recursive(indices_left, indices_start_idx, object_bounds);
+                let child_right = Bvh::build_recursive(
+                    indices_right,
+                    indices_start_idx + split_idx,
+                    object_bounds,
+                );
 
                 BvhNode::Inner {
                     child_bbox: [bounds_l, bounds_r],
@@ -193,12 +203,16 @@ impl Bvh<'_> {
                         stack.push(&children[1]);
                     };
                 }
-                BvhNode::Leaf { object } => {
-                    let hit =
-                        self.objects[*object].intersect_simd::<false>(ray_origin, ray_direction);
-                    result |= hit.cmp_lt(f32::INFINITY).move_mask();
-                    if result == 0b1111 {
-                        return result;
+                BvhNode::Leaf { objects } => {
+                    for obj in objects
+                        .clone()
+                        .map(|i| &self.objects[self.object_indices[i]])
+                    {
+                        let hit = obj.intersect_simd::<false>(ray_origin, ray_direction);
+                        result |= hit.cmp_lt(f32::INFINITY).move_mask();
+                        if result == 0b1111 {
+                            return result;
+                        }
                     }
                 }
             }
@@ -305,10 +319,12 @@ impl Bvh<'_> {
                         stack.push((&children[1], 1, ray_list_sizes_orig[1]));
                     }
                 }
-                BvhNode::Leaf { object } => {
+                BvhNode::Leaf { objects } => {
                     stats.leaf_visit += 1;
-                    stats.obj_intersect += (last_active_ray_idx - active_ray_idx) as u32;
-                    stats.obj_intersect_skipped += stats.obj_intersect - rays.len() as u32;
+                    stats.obj_intersect +=
+                        ((last_active_ray_idx - active_ray_idx) * objects.len()) as u32;
+                    stats.obj_intersect_skipped +=
+                        stats.obj_intersect - rays.len() as u32 * objects.len() as u32;
 
                     for ray_indices in
                         ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
@@ -332,12 +348,16 @@ impl Bvh<'_> {
                             rays[ray_indices_padded[3]].direction,
                         ]);
 
-                        let hit = self.objects[*object]
-                            .intersect_simd::<false>(&ray_origins, &ray_directions);
+                        for obj in objects
+                            .clone()
+                            .map(|i| &self.objects[self.object_indices[i]])
+                        {
+                            let hit = obj.intersect_simd::<false>(&ray_origins, &ray_directions);
 
-                        let hit: [f32; 4] = hit.into();
-                        for (&i, hit) in ray_indices.iter().zip(hit) {
-                            results[i as usize].add_hit(hit, &self.objects[*object]);
+                            let hit: [f32; 4] = hit.into();
+                            for (&i, hit) in ray_indices.iter().zip(hit) {
+                                results[i as usize].add_hit(hit, obj);
+                            }
                         }
                     }
                 }
