@@ -8,6 +8,12 @@ use crate::{Ray, TraceResult, Triangle};
 use arrayvec::ArrayVec;
 use wide::CmpLt;
 
+#[inline]
+#[allow(non_snake_case)]
+pub const fn _MM_SHUFFLE_(z: u32, y: u32, x: u32, w: u32) -> i32 {
+    ((z << 6) | (y << 4) | (x << 2) | w) as i32
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct TraceStats {
     inner_visit: u32,
@@ -227,6 +233,8 @@ impl Bvh<'_> {
         results: &mut [TraceResult<'a>],
         stats: &mut TraceStats,
     ) {
+        use std::arch::x86_64::*;
+
         let mut stack = ArrayVec::<_, 32>::new();
         let mut ray_lists = [
             vec![0; rays.len() * 32],
@@ -275,24 +283,90 @@ impl Bvh<'_> {
                             } as usize,
                         ];
                         let origins = Vec3x4::from([
-                            rays[ray_indices[0]].origin,
-                            rays[ray_indices[1]].origin,
-                            rays[ray_indices[2]].origin,
-                            rays[ray_indices[3]].origin,
+                            rays[ray_indices[0]].origin.xyz(),
+                            rays[ray_indices[1]].origin.xyz(),
+                            rays[ray_indices[2]].origin.xyz(),
+                            rays[ray_indices[3]].origin.xyz(),
                         ]);
                         let directions_recip = Vec3x4::from([
-                            rays[ray_indices[0]].direction_recip,
-                            rays[ray_indices[1]].direction_recip,
-                            rays[ray_indices[2]].direction_recip,
-                            rays[ray_indices[3]].direction_recip,
+                            rays[ray_indices[0]].direction_recip.xyz(),
+                            rays[ray_indices[1]].direction_recip.xyz(),
+                            rays[ray_indices[2]].direction_recip.xyz(),
+                            rays[ray_indices[3]].direction_recip.xyz(),
                         ]);
 
-                        let hit_left = child_bbox[0]
-                            .intersect_simd(&origins, &directions_recip)
-                            .move_mask();
-                        let hit_right = child_bbox[1]
-                            .intersect_simd(&origins, &directions_recip)
-                            .move_mask();
+                        let (hit_left, hit_right) = unsafe {
+                            const MASK1010: i32 = _MM_SHUFFLE_(1, 0, 1, 0);
+                            const MASK3232: i32 = _MM_SHUFFLE_(3, 2, 3, 2);
+
+                            let origin_x0y0z0w0 = _mm_load_ps(rays[ray_indices[0]].origin.as_ptr());
+                            let origin_x1y1z1w1 = _mm_load_ps(rays[ray_indices[1]].origin.as_ptr());
+                            let origin_x2y2z2w2 = _mm_load_ps(rays[ray_indices[2]].origin.as_ptr());
+                            let origin_x3y3z3w3 = _mm_load_ps(rays[ray_indices[3]].origin.as_ptr());
+
+                            let dir_recip_x0y0z0w0 = _mm_load_ps(rays[ray_indices[0]].direction_recip.as_ptr());
+                            let dir_recip_x1y1z1w1 = _mm_load_ps(rays[ray_indices[1]].direction_recip.as_ptr());
+                            let dir_recip_x2y2z2w2 = _mm_load_ps(rays[ray_indices[2]].direction_recip.as_ptr());
+                            let dir_recip_x3y3z3w3 = _mm_load_ps(rays[ray_indices[3]].direction_recip.as_ptr());
+                            
+                            let origin_x0x1y0y1 = _mm_unpacklo_ps(origin_x0y0z0w0, origin_x1y1z1w1);
+                            let origin_x2x3y2y3 = _mm_unpacklo_ps(origin_x2y2z2w2, origin_x3y3z3w3);
+                            let origin_z0z1w0w1 = _mm_unpackhi_ps(origin_x0y0z0w0, origin_x1y1z1w1);
+                            let origin_z2z3w2w3 = _mm_unpackhi_ps(origin_x2y2z2w2, origin_x3y3z3w3);
+                            let origin_x = _mm_shuffle_ps::<MASK1010>(origin_x0x1y0y1, origin_x2x3y2y3);
+                            let origin_y = _mm_shuffle_ps::<MASK3232>(origin_x0x1y0y1, origin_x2x3y2y3);
+                            let origin_z = _mm_shuffle_ps::<MASK1010>(origin_z0z1w0w1, origin_z2z3w2w3);
+
+                            let dir_recip_x0x1y0y1 = _mm_unpacklo_ps(dir_recip_x0y0z0w0, dir_recip_x1y1z1w1);
+                            let dir_recip_x2x3y2y3 = _mm_unpacklo_ps(dir_recip_x2y2z2w2, dir_recip_x3y3z3w3);
+                            let dir_recip_z0z1w0w1 = _mm_unpackhi_ps(dir_recip_x0y0z0w0, dir_recip_x1y1z1w1);
+                            let dir_recip_z2z3w2w3 = _mm_unpackhi_ps(dir_recip_x2y2z2w2, dir_recip_x3y3z3w3);
+                            let dir_recip_x = _mm_shuffle_ps::<MASK1010>(dir_recip_x0x1y0y1, dir_recip_x2x3y2y3);
+                            let dir_recip_y = _mm_shuffle_ps::<MASK3232>(dir_recip_x0x1y0y1, dir_recip_x2x3y2y3);
+                            let dir_recip_z = _mm_shuffle_ps::<MASK1010>(dir_recip_z0z1w0w1, dir_recip_z2z3w2w3);
+                            
+
+                            let origin_dir_recip_x = _mm_mul_ps(origin_x, dir_recip_x);
+                            let origin_dir_recip_y = _mm_mul_ps(origin_y, dir_recip_y);
+                            let origin_dir_recip_z = _mm_mul_ps(origin_z, dir_recip_z);
+
+                            let intersect_bb = |aabb: &Aabb| {
+                                let bb_min_x = _mm_load1_ps(&aabb.min.x);
+                                let bb_max_x = _mm_load1_ps(&aabb.max.x);
+                                let tx1 = _mm_fmsub_ps(bb_min_x, dir_recip_x, origin_dir_recip_x);
+                                let tx2 = _mm_fmsub_ps(bb_max_x, dir_recip_x, origin_dir_recip_x);
+
+                                let tmin = _mm_min_ps(tx1, tx2);
+                                let tmax = _mm_max_ps(tx1, tx2);
+
+                                let bb_min_y = _mm_load1_ps(&aabb.min.y);
+                                let bb_max_y = _mm_load1_ps(&aabb.max.y);
+                                let ty1 = _mm_fmsub_ps(bb_min_y, dir_recip_y, origin_dir_recip_y);
+                                let ty2 = _mm_fmsub_ps(bb_max_y, dir_recip_y, origin_dir_recip_y);
+
+                                let tmin = _mm_max_ps(tmin,_mm_min_ps(ty1, ty2));
+                                let tmax = _mm_min_ps(tmax, _mm_max_ps(ty1, ty2));
+
+                                let bb_min_z = _mm_load1_ps(&aabb.min.z);
+                                let bb_max_z = _mm_load1_ps(&aabb.max.z);
+                                let tz1 = _mm_fmsub_ps(bb_min_z, dir_recip_z, origin_dir_recip_z);
+                                let tz2 = _mm_fmsub_ps(bb_max_z, dir_recip_z, origin_dir_recip_z);
+
+                                let tmin = _mm_max_ps(tmin,_mm_min_ps(tz1, tz2));
+                                let tmax = _mm_min_ps(tmax, _mm_max_ps(tz1, tz2));
+
+                                _mm_movemask_ps(_mm_cmpge_ps(tmax, _mm_max_ps(tmin, _mm_setzero_ps())))
+                            };
+
+                            (intersect_bb(&child_bbox[0]), intersect_bb(&child_bbox[1]))
+                        };
+
+                        // let hit_left = child_bbox[0]
+                        //     .intersect_simd(&origins, &directions_recip)
+                        //     .move_mask();
+                        // let hit_right = child_bbox[1]
+                        //     .intersect_simd(&origins, &directions_recip)
+                        //     .move_mask();
                         for (i, ray_idx) in ray_indices
                             .iter()
                             .enumerate()
@@ -336,16 +410,16 @@ impl Bvh<'_> {
                             *ray_indices.get(3).unwrap_or(&ray_indices[0]) as usize,
                         ];
                         let ray_origins = Vec3x4::from([
-                            rays[ray_indices_padded[0]].origin,
-                            rays[ray_indices_padded[1]].origin,
-                            rays[ray_indices_padded[2]].origin,
-                            rays[ray_indices_padded[3]].origin,
+                            rays[ray_indices_padded[0]].origin.xyz(),
+                            rays[ray_indices_padded[1]].origin.xyz(),
+                            rays[ray_indices_padded[2]].origin.xyz(),
+                            rays[ray_indices_padded[3]].origin.xyz(),
                         ]);
                         let ray_directions = Vec3x4::from([
-                            rays[ray_indices_padded[0]].direction,
-                            rays[ray_indices_padded[1]].direction,
-                            rays[ray_indices_padded[2]].direction,
-                            rays[ray_indices_padded[3]].direction,
+                            rays[ray_indices_padded[0]].direction.xyz(),
+                            rays[ray_indices_padded[1]].direction.xyz(),
+                            rays[ray_indices_padded[2]].direction.xyz(),
+                            rays[ray_indices_padded[3]].direction.xyz(),
                         ]);
 
                         for obj in objects

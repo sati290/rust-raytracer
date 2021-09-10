@@ -6,24 +6,25 @@ use bvh::{Bvh, TraceStats};
 use obj::Obj;
 use rayon::prelude::*;
 use std::time::Instant;
-use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4};
+use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4, Vec4};
 use wide::{f32x4, CmpGe, CmpLe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
 const PACKET_SIZE: u32 = 32;
 
+#[repr(C, align(16))]
 pub struct Ray {
-    origin: Vec3,
-    direction: Vec3,
-    direction_recip: Vec3,
+    origin: Vec4,
+    direction: Vec4,
+    direction_recip: Vec4,
 }
 
 impl Ray {
     fn new(origin: &Vec3, direction: &Vec3) -> Self {
         Ray {
-            origin: *origin,
-            direction: *direction,
-            direction_recip: Vec3::one() / *direction,
+            origin: Vec4::from(*origin),
+            direction: Vec4::from(*direction),
+            direction_recip: Vec4::from(Vec3::one() / *direction),
         }
     }
 }
@@ -237,7 +238,7 @@ fn trace_packet<'a>(
     let transformed_rays: Vec<_> = packet
         .rays
         .iter()
-        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction)))
+        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction.xyz())))
         .collect();
 
     let mut trace_results =
@@ -266,10 +267,10 @@ fn trace_packet<'a>(
         }
 
         let rays = Vec3x4::from([
-            rays[0].direction,
-            rays[1].direction,
-            rays[2].direction,
-            rays[3].direction,
+            rays[0].direction.xyz(),
+            rays[1].direction.xyz(),
+            rays[2].direction.xyz(),
+            rays[3].direction.xyz(),
         ]);
 
         let hit_pos = cam_posx4 + rays * closest_hit;
