@@ -13,6 +13,7 @@ wide = "0.6"
 rand = "0.8"
 obj = "0.10"
 arrayvec = "0.7"
+safe_arch = "0.6"
 
 [[bin]]
 name = "rust"
