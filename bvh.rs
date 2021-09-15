@@ -262,119 +262,138 @@ impl Bvh<'_> {
                 } => {
                     stats.inner_visit += 1;
 
+                    let bb_min_x = m128::from([
+                        child_bbox[0].min.x,
+                        child_bbox[1].min.x,
+                        child_bbox[0].min.x,
+                        child_bbox[1].min.x,
+                    ]);
+                    let bb_max_x = m128::from([
+                        child_bbox[0].max.x,
+                        child_bbox[1].max.x,
+                        child_bbox[0].max.x,
+                        child_bbox[1].max.x,
+                    ]);
+                    let bb_min_y = m128::from([
+                        child_bbox[0].min.y,
+                        child_bbox[1].min.y,
+                        child_bbox[0].min.y,
+                        child_bbox[1].min.y,
+                    ]);
+                    let bb_max_y = m128::from([
+                        child_bbox[0].max.y,
+                        child_bbox[1].max.y,
+                        child_bbox[0].max.y,
+                        child_bbox[1].max.y,
+                    ]);
+                    let bb_min_z = m128::from([
+                        child_bbox[0].min.z,
+                        child_bbox[1].min.z,
+                        child_bbox[0].min.z,
+                        child_bbox[1].min.z,
+                    ]);
+                    let bb_max_z = m128::from([
+                        child_bbox[0].max.z,
+                        child_bbox[1].max.z,
+                        child_bbox[0].max.z,
+                        child_bbox[1].max.z,
+                    ]);
+
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
-                        let ray_indices = [
-                            ray_lists[list_idx][active_ray_idx] as usize,
-                            if active_ray_idx + 1 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 1]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                            if active_ray_idx + 2 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 2]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                            if active_ray_idx + 3 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 3]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                        ];
+                        let ray_idx_a = ray_lists[list_idx][active_ray_idx] as usize;
+                        let ray_idx_b = ray_lists[list_idx][active_ray_idx + 1] as usize;
 
-                        let mut origin_x = m128::from(*rays[ray_indices[0]].origin.as_array());
-                        let mut origin_y = m128::from(*rays[ray_indices[1]].origin.as_array());
-                        let mut origin_z = m128::from(*rays[ray_indices[2]].origin.as_array());
-                        let mut origin_w = m128::from(*rays[ray_indices[3]].origin.as_array());
+                        let origin_xyzw_a = m128::from(*rays[ray_idx_a].origin.as_array());
+                        let origin_xyzw_b = m128::from(*rays[ray_idx_b].origin.as_array());
 
-                        transpose_four_m128(
-                            &mut origin_x,
-                            &mut origin_y,
-                            &mut origin_z,
-                            &mut origin_w,
+                        let dir_recip_xyzw_a =
+                            m128::from(*rays[ray_idx_a].direction_recip.as_array());
+                        let dir_recip_xyzw_b =
+                            m128::from(*rays[ray_idx_b].direction_recip.as_array());
+
+                        let origin_x =
+                            shuffle_abi_f32_all_m128::<0b00_00_00_00>(origin_xyzw_a, origin_xyzw_b);
+                        let origin_y =
+                            shuffle_abi_f32_all_m128::<0b01_01_01_01>(origin_xyzw_a, origin_xyzw_b);
+                        let origin_z =
+                            shuffle_abi_f32_all_m128::<0b10_10_10_10>(origin_xyzw_a, origin_xyzw_b);
+
+                        let dir_recip_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(
+                            dir_recip_xyzw_a,
+                            dir_recip_xyzw_b,
                         );
-
-                        let mut dir_recip_x =
-                            m128::from(*rays[ray_indices[0]].direction_recip.as_array());
-                        let mut dir_recip_y =
-                            m128::from(*rays[ray_indices[1]].direction_recip.as_array());
-                        let mut dir_recip_z =
-                            m128::from(*rays[ray_indices[2]].direction_recip.as_array());
-                        let mut dir_recip_w =
-                            m128::from(*rays[ray_indices[3]].direction_recip.as_array());
-
-                        transpose_four_m128(
-                            &mut dir_recip_x,
-                            &mut dir_recip_y,
-                            &mut dir_recip_z,
-                            &mut dir_recip_w,
+                        let dir_recip_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(
+                            dir_recip_xyzw_a,
+                            dir_recip_xyzw_b,
+                        );
+                        let dir_recip_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(
+                            dir_recip_xyzw_a,
+                            dir_recip_xyzw_b,
                         );
 
                         let origin_dir_recip_x = origin_x * dir_recip_x;
                         let origin_dir_recip_y = origin_y * dir_recip_y;
                         let origin_dir_recip_z = origin_z * dir_recip_z;
 
-                        let intersect_bb = |aabb: &Aabb| {
-                            let bb_min_x = load_f32_splat_m128(&aabb.min.x);
-                            let bb_max_x = load_f32_splat_m128(&aabb.max.x);
-                            let bb_min_y = load_f32_splat_m128(&aabb.min.y);
-                            let bb_max_y = load_f32_splat_m128(&aabb.max.y);
-                            let bb_min_z = load_f32_splat_m128(&aabb.min.z);
-                            let bb_max_z = load_f32_splat_m128(&aabb.max.z);
-                            let tx1 = fused_mul_sub_m128(bb_min_x, dir_recip_x, origin_dir_recip_x);
-                            let tx2 = fused_mul_sub_m128(bb_max_x, dir_recip_x, origin_dir_recip_x);
+                        let tx1 = fused_mul_sub_m128(bb_min_x, dir_recip_x, origin_dir_recip_x);
+                        let tx2 = fused_mul_sub_m128(bb_max_x, dir_recip_x, origin_dir_recip_x);
+                        let ty1 = fused_mul_sub_m128(bb_min_y, dir_recip_y, origin_dir_recip_y);
+                        let ty2 = fused_mul_sub_m128(bb_max_y, dir_recip_y, origin_dir_recip_y);
+                        let tz1 = fused_mul_sub_m128(bb_min_z, dir_recip_z, origin_dir_recip_z);
+                        let tz2 = fused_mul_sub_m128(bb_max_z, dir_recip_z, origin_dir_recip_z);
 
-                            let tmin = min_m128(tx1, tx2);
-                            let tmax = max_m128(tx1, tx2);
+                        let tnear = max_m128(
+                            max_m128(min_m128(tx1, tx2), min_m128(ty1, ty2)),
+                            min_m128(tz1, tz2),
+                        );
+                        let tfar = min_m128(
+                            min_m128(max_m128(tx1, tx2), max_m128(ty1, ty2)),
+                            max_m128(tz1, tz2),
+                        );
 
-                            let ty1 = fused_mul_sub_m128(bb_min_y, dir_recip_y, origin_dir_recip_y);
-                            let ty2 = fused_mul_sub_m128(bb_max_y, dir_recip_y, origin_dir_recip_y);
+                        let mask =
+                            move_mask_m128(cmp_ge_mask_m128(tfar, max_m128(tnear, zeroed_m128())));
 
-                            let tmin = max_m128(tmin, min_m128(ty1, ty2));
-                            let tmax = min_m128(tmax, max_m128(ty1, ty2));
+                        ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
+                        ray_list_sizes[0] += (mask & 0b1) as usize;
+                        ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
+                        ray_list_sizes[1] += ((mask >> 1) & 0b1) as usize;
+                        ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
+                        ray_list_sizes[0] += ((mask >> 2) & 0b1) as usize;
+                        ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
+                        ray_list_sizes[1] += ((mask >> 3) & 0b1) as usize;
 
-                            let tz1 = fused_mul_sub_m128(bb_min_z, dir_recip_z, origin_dir_recip_z);
-                            let tz2 = fused_mul_sub_m128(bb_max_z, dir_recip_z, origin_dir_recip_z);
+                        active_ray_idx += 2;
+                    }
 
-                            let tmin = max_m128(tmin, min_m128(tz1, tz2));
-                            let tmax = min_m128(tmax, max_m128(tz1, tz2));
-
-                            move_mask_m128(cmp_ge_mask_m128(tmax, max_m128(tmin, zeroed_m128())))
-                        };
-
-                        let hit_left = intersect_bb(&child_bbox[0]);
-                        let hit_right = intersect_bb(&child_bbox[1]);
-
-                        // let hit_left = child_bbox[0]
-                        //     .intersect_simd(&origins, &directions_recip)
-                        //     .move_mask();
-                        // let hit_right = child_bbox[1]
-                        //     .intersect_simd(&origins, &directions_recip)
-                        //     .move_mask();
-                        for (i, ray_idx) in ray_indices
-                            .iter()
-                            .enumerate()
-                            .take(last_active_ray_idx - active_ray_idx)
-                        {
-                            if hit_left & 1 << i != 0 {
-                                ray_lists[0][ray_list_sizes[0]] = *ray_idx as u16;
+                    let list0_len = ray_list_sizes[0] - ray_list_sizes_orig[0];
+                    if list0_len > 0 {
+                        if list0_len % 2 != 0 {
+                            let last = ray_lists[0][ray_list_sizes[0] - 1];
+                            if list0_len >= 2 && last == ray_lists[0][ray_list_sizes[0] - 2] {
+                                ray_list_sizes[0] -= 1;
+                            } else {
+                                ray_lists[0][ray_list_sizes[0]] = last;
                                 ray_list_sizes[0] += 1;
                             }
-                            if hit_right & 1 << i != 0 {
-                                ray_lists[1][ray_list_sizes[1]] = *ray_idx as u16;
+                        }
+
+                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
+                    }
+
+                    let list1_len = ray_list_sizes[1] - ray_list_sizes_orig[1];
+                    if list1_len > 0 {
+                        if list1_len % 2 != 0 {
+                            let last = ray_lists[1][ray_list_sizes[1] - 1];
+                            if list1_len >= 2 && last == ray_lists[1][ray_list_sizes[1] - 2] {
+                                ray_list_sizes[1] -= 1;
+                            } else {
+                                ray_lists[1][ray_list_sizes[1]] = last;
                                 ray_list_sizes[1] += 1;
                             }
                         }
 
-                        active_ray_idx += 4;
-                    }
-
-                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
-                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
-                    }
-
-                    if ray_list_sizes[1] - ray_list_sizes_orig[1] > 0 {
                         stack.push((&children[1], 1, ray_list_sizes_orig[1]));
                     }
                 }
