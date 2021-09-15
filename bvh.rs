@@ -8,12 +8,6 @@ use crate::{Ray, TraceResult, Triangle};
 use arrayvec::ArrayVec;
 use wide::CmpLt;
 
-#[inline]
-#[allow(non_snake_case)]
-pub const fn _MM_SHUFFLE_(z: u32, y: u32, x: u32, w: u32) -> i32 {
-    ((z << 6) | (y << 4) | (x << 2) | w) as i32
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct TraceStats {
     inner_visit: u32,
