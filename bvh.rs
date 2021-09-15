@@ -296,7 +296,7 @@ impl Bvh<'_> {
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
                         let ray_idx_a = ray_lists[list_idx][active_ray_idx] as usize;
-                        let ray_idx_b = ray_lists[list_idx][active_ray_idx + 1] as usize;
+                        let ray_idx_b = if active_ray_idx + 1 < last_active_ray_idx { ray_lists[list_idx][active_ray_idx + 1] as usize } else {ray_idx_a};
 
                         let origin_xyzw_a = m128::from(*rays[ray_idx_a].origin.as_array());
                         let origin_xyzw_b = m128::from(*rays[ray_idx_b].origin.as_array());
@@ -361,33 +361,11 @@ impl Bvh<'_> {
                         active_ray_idx += 2;
                     }
 
-                    let list0_len = ray_list_sizes[0] - ray_list_sizes_orig[0];
-                    if list0_len > 0 {
-                        if list0_len % 2 != 0 {
-                            let last = ray_lists[0][ray_list_sizes[0] - 1];
-                            if list0_len >= 2 && last == ray_lists[0][ray_list_sizes[0] - 2] {
-                                ray_list_sizes[0] -= 1;
-                            } else {
-                                ray_lists[0][ray_list_sizes[0]] = last;
-                                ray_list_sizes[0] += 1;
-                            }
-                        }
-
+                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
                         stack.push((&children[0], 0, ray_list_sizes_orig[0]));
                     }
 
-                    let list1_len = ray_list_sizes[1] - ray_list_sizes_orig[1];
-                    if list1_len > 0 {
-                        if list1_len % 2 != 0 {
-                            let last = ray_lists[1][ray_list_sizes[1] - 1];
-                            if list1_len >= 2 && last == ray_lists[1][ray_list_sizes[1] - 2] {
-                                ray_list_sizes[1] -= 1;
-                            } else {
-                                ray_lists[1][ray_list_sizes[1]] = last;
-                                ray_list_sizes[1] += 1;
-                            }
-                        }
-
+                    if ray_list_sizes[1] - ray_list_sizes_orig[1] > 0 {
                         stack.push((&children[1], 1, ray_list_sizes_orig[1]));
                     }
                 }
