@@ -15,8 +15,8 @@ const PACKET_SIZE: u32 = 32;
 #[repr(C, align(16))]
 pub struct Ray {
     origin: Vec4,
-    direction: Vec4,
     direction_recip: Vec4,
+    direction: Vec4,
 }
 
 impl Ray {
@@ -164,25 +164,28 @@ impl Triangle {
 
 struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
-    rays: Vec<Ray>,
+    ray_directions: Vec<Vec3>,
     trace_stats: TraceStats,
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
 }
 
 impl<'a> RayPacket<'a> {
-    fn new(pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)], rays: Vec<Ray>) -> Self {
+    fn new(
+        pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+        ray_directions: Vec<Vec3>,
+    ) -> Self {
         let mut min = Vec2::broadcast(f32::INFINITY);
         let mut max = Vec2::broadcast(f32::NEG_INFINITY);
-        for r in &rays {
-            let uv = r.direction.xy() / r.direction.z;
+        for r in &ray_directions {
+            let uv = r.xy() / r.z;
             min = min.min_by_component(uv);
             max = max.max_by_component(uv);
         }
 
         RayPacket {
             pixels,
-            rays,
+            ray_directions,
             trace_stats: TraceStats::new(),
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
@@ -236,9 +239,9 @@ fn trace_packet<'a>(
     let light_posx4 = Vec3x4::splat(*light_pos);
 
     let transformed_rays: Vec<_> = packet
-        .rays
+        .ray_directions
         .iter()
-        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction.xyz())))
+        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * *r)))
         .collect();
 
     let mut trace_results =
@@ -302,10 +305,8 @@ fn trace_packet<'a>(
         let ndl: [f32; 4] = ndl.into();
         let mut color = Vec3::zero();
         for i in 0..4 {
-            if let Some(o) = closest_obj[i] {
-                if shadow_hit & 1 << i == 0 {
-                    color += Vec3::one() * ndl[i] / 4.;
-                }
+            if closest_obj[i].is_some() && shadow_hit & 1 << i == 0 {
+                color += Vec3::one() * ndl[i] / 4.;
             }
         }
 
@@ -388,8 +389,7 @@ fn main() {
                 .flat_map(|(x, y, _)| {
                     let camera_rays = &camera_rays;
                     let rays_index = get_camera_ray_index(*x, *y);
-                    (0..NUM_SUBSAMPLES)
-                        .map(move |i| Ray::new(&Vec3::zero(), &camera_rays[rays_index + i]))
+                    (0..NUM_SUBSAMPLES).map(move |i| camera_rays[rays_index + i])
                 })
                 .collect();
 

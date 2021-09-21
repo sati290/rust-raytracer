@@ -296,7 +296,11 @@ impl Bvh<'_> {
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
                         let ray_idx_a = ray_lists[list_idx][active_ray_idx] as usize;
-                        let ray_idx_b = if active_ray_idx + 1 < last_active_ray_idx { ray_lists[list_idx][active_ray_idx + 1] as usize } else {ray_idx_a};
+                        let ray_idx_b = if active_ray_idx + 1 < last_active_ray_idx {
+                            ray_lists[list_idx][active_ray_idx + 1] as usize
+                        } else {
+                            ray_idx_a
+                        };
 
                         let origin_xyzw_a = m128::from(*rays[ray_idx_a].origin.as_array());
                         let origin_xyzw_b = m128::from(*rays[ray_idx_b].origin.as_array());
