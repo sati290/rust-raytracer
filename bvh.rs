@@ -223,7 +223,7 @@ impl Bvh<'_> {
 
     pub fn trace_stream<'a>(
         &'a self,
-        rays: &[Ray],
+        rays: &mut [Ray],
         results: &mut [TraceResult<'a>],
         stats: &mut TraceStats,
     ) {
@@ -302,32 +302,43 @@ impl Bvh<'_> {
                             ray_idx_a
                         };
 
-                        let origin_xyzw_a = m128::from(*rays[ray_idx_a].origin.as_array());
-                        let origin_xyzw_b = m128::from(*rays[ray_idx_b].origin.as_array());
+                        let origin_xyz_near_a = m128::from(*rays[ray_idx_a].origin_near.as_array());
+                        let origin_xyz_near_b = m128::from(*rays[ray_idx_b].origin_near.as_array());
 
-                        let dir_recip_xyzw_a =
-                            m128::from(*rays[ray_idx_a].direction_recip.as_array());
-                        let dir_recip_xyzw_b =
-                            m128::from(*rays[ray_idx_b].direction_recip.as_array());
+                        let dir_recip_xyz_far_a =
+                            m128::from(*rays[ray_idx_a].direction_recip_far.as_array());
+                        let dir_recip_xyz_far_b =
+                            m128::from(*rays[ray_idx_b].direction_recip_far.as_array());
 
-                        let origin_x =
-                            shuffle_abi_f32_all_m128::<0b00_00_00_00>(origin_xyzw_a, origin_xyzw_b);
-                        let origin_y =
-                            shuffle_abi_f32_all_m128::<0b01_01_01_01>(origin_xyzw_a, origin_xyzw_b);
-                        let origin_z =
-                            shuffle_abi_f32_all_m128::<0b10_10_10_10>(origin_xyzw_a, origin_xyzw_b);
+                        let origin_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
+                        let origin_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
+                        let origin_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
 
                         let dir_recip_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(
-                            dir_recip_xyzw_a,
-                            dir_recip_xyzw_b,
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
                         );
                         let dir_recip_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(
-                            dir_recip_xyzw_a,
-                            dir_recip_xyzw_b,
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
                         );
                         let dir_recip_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(
-                            dir_recip_xyzw_a,
-                            dir_recip_xyzw_b,
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
+                        );
+
+                        let ray_far = shuffle_abi_f32_all_m128::<0b11_11_11_11>(
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
                         );
 
                         let origin_dir_recip_x = origin_x * dir_recip_x;
@@ -350,8 +361,10 @@ impl Bvh<'_> {
                             max_m128(tz1, tz2),
                         );
 
-                        let mask =
-                            move_mask_m128(cmp_ge_mask_m128(tfar, max_m128(tnear, zeroed_m128())));
+                        let mask = move_mask_m128(cmp_ge_mask_m128(
+                            min_m128(tfar, ray_far),
+                            max_m128(tnear, zeroed_m128()),
+                        ));
 
                         ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
                         ray_list_sizes[0] += (mask & 0b1) as usize;
@@ -390,10 +403,10 @@ impl Bvh<'_> {
                             *ray_indices.get(3).unwrap_or(&ray_indices[0]) as usize,
                         ];
                         let ray_origins = Vec3x4::from([
-                            rays[ray_indices_padded[0]].origin.xyz(),
-                            rays[ray_indices_padded[1]].origin.xyz(),
-                            rays[ray_indices_padded[2]].origin.xyz(),
-                            rays[ray_indices_padded[3]].origin.xyz(),
+                            rays[ray_indices_padded[0]].origin_near.xyz(),
+                            rays[ray_indices_padded[1]].origin_near.xyz(),
+                            rays[ray_indices_padded[2]].origin_near.xyz(),
+                            rays[ray_indices_padded[3]].origin_near.xyz(),
                         ]);
                         let ray_directions = Vec3x4::from([
                             rays[ray_indices_padded[0]].direction.xyz(),
@@ -410,7 +423,10 @@ impl Bvh<'_> {
 
                             let hit: [f32; 4] = hit.into();
                             for (&i, hit) in ray_indices.iter().zip(hit) {
-                                results[i as usize].add_hit(hit, obj);
+                                let ray = &mut rays[i as usize];
+                                let result = &mut results[i as usize];
+                                result.add_hit(hit, obj);
+                                ray.direction_recip_far.w = result.hit_dist;
                             }
                         }
                     }

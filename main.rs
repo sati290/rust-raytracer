@@ -14,17 +14,18 @@ const PACKET_SIZE: u32 = 32;
 
 #[repr(C, align(16))]
 pub struct Ray {
-    origin: Vec4,
-    direction_recip: Vec4,
+    origin_near: Vec4,         // x, y, z, near
+    direction_recip_far: Vec4, // x, y, z, far
     direction: Vec4,
 }
 
 impl Ray {
     fn new(origin: &Vec3, direction: &Vec3) -> Self {
+        let dir_recip = Vec3::one() / *direction;
         Ray {
-            origin: Vec4::from(*origin),
+            origin_near: Vec4::new(origin.x, origin.y, origin.z, 0.),
             direction: Vec4::from(*direction),
-            direction_recip: Vec4::from(Vec3::one() / *direction),
+            direction_recip_far: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, f32::INFINITY),
         }
     }
 }
@@ -238,7 +239,7 @@ fn trace_packet<'a>(
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
-    let transformed_rays: Vec<_> = packet
+    let mut transformed_rays: Vec<_> = packet
         .ray_directions
         .iter()
         .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * *r)))
@@ -247,7 +248,7 @@ fn trace_packet<'a>(
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
     bvh.trace_stream(
-        &transformed_rays,
+        &mut transformed_rays,
         &mut trace_results,
         &mut packet.trace_stats,
     );
