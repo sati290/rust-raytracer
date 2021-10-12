@@ -369,22 +369,26 @@ impl Bvh<'_> {
                         let tnear = tnear.to_array();
                         let left_hit_a = mask & 0b1;
                         let right_hit_a = (mask >> 1) & 0b1;
-                        let left_first_a = if tnear[0] < tnear[1] { 1 } else { 0 };
+                        let left_first_a = if tnear[0] < tnear[1] { 0b1 } else { 0b0 };
 
                         ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
                         ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
-                        ray_list_sizes[0] += left_hit_a as usize;
+                        ray_lists[2][ray_list_sizes[2]] = ray_idx_a as u16;
+                        ray_list_sizes[0] += (left_hit_a & left_first_a) as usize;
                         ray_list_sizes[1] += right_hit_a as usize;
+                        ray_list_sizes[2] += (left_hit_a & (left_first_a ^ 0b1)) as usize;
 
                         if ray_idx_a != ray_idx_b {
                             let left_hit_b = (mask >> 2) & 0b1;
                             let right_hit_b = (mask >> 3) & 0b1;
-                            let left_first_b = if tnear[2] < tnear[3] { 1 } else { 0 };
+                            let left_first_b = if tnear[2] < tnear[3] { 0b1 } else { 0b0 };
 
                             ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
                             ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
-                            ray_list_sizes[0] += left_hit_b as usize;
+                            ray_lists[2][ray_list_sizes[2]] = ray_idx_b as u16;
+                            ray_list_sizes[0] += (left_hit_b & left_first_b) as usize;
                             ray_list_sizes[1] += right_hit_b as usize;
+                            ray_list_sizes[2] += (left_hit_b & (left_first_b ^ 0b1)) as usize;
                         }
 
                         active_ray_idx += 2;
