@@ -406,9 +406,21 @@ fn main() {
         PACKET_SIZE * PACKET_SIZE * NUM_SUBSAMPLES as u32
     );
 
+    let warmup_start = Instant::now();
+
+    let warmup_frames = 5;
+    for _ in 0..warmup_frames {
+        packets
+            .par_iter_mut()
+            .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &camera_transform, &light_pos));
+    }
+
+    let warmup_elapsed = warmup_start.elapsed();
+    println!("warmup {:.2?} for {} frames", warmup_elapsed, warmup_frames);
+
+    let frames = (15. / (warmup_elapsed.as_secs_f32() / warmup_frames as f32)).ceil() as u32;
     let time_start = Instant::now();
 
-    let frames = 20;
     for _ in 0..frames {
         packets
             .par_iter_mut()
