@@ -366,10 +366,14 @@ impl Bvh<'_> {
                             max_m128(tnear, zeroed_m128()),
                         ));
 
-                        let tnear = tnear.to_array();
+                        let left_first_mask = move_mask_m128(cmp_le_mask_m128(
+                            tnear,
+                            shuffle_abi_f32_all_m128::<0b11_11_01_01>(tnear, tnear),
+                        ));
+
                         let left_hit_a = mask & 0b1;
                         let right_hit_a = (mask >> 1) & 0b1;
-                        let left_first_a = if tnear[0] < tnear[1] { 0b1 } else { 0b0 };
+                        let left_first_a = left_first_mask & 0b1;
 
                         ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
                         ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
@@ -381,7 +385,7 @@ impl Bvh<'_> {
                         if ray_idx_a != ray_idx_b {
                             let left_hit_b = (mask >> 2) & 0b1;
                             let right_hit_b = (mask >> 3) & 0b1;
-                            let left_first_b = if tnear[2] < tnear[3] { 0b1 } else { 0b0 };
+                            let left_first_b = (left_first_mask >> 2) & 0b1;
 
                             ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
                             ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
