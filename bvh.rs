@@ -366,24 +366,40 @@ impl Bvh<'_> {
                             max_m128(tnear, zeroed_m128()),
                         ));
 
+                        let tnear = tnear.to_array();
+                        let left_hit_a = mask & 0b1;
+                        let right_hit_a = (mask >> 1) & 0b1;
+                        let left_first_a = if tnear[0] < tnear[1] { 1 } else { 0 };
+
                         ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
-                        ray_list_sizes[0] += (mask & 0b1) as usize;
                         ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
-                        ray_list_sizes[1] += ((mask >> 1) & 0b1) as usize;
-                        ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
-                        ray_list_sizes[0] += ((mask >> 2) & 0b1) as usize;
-                        ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
-                        ray_list_sizes[1] += ((mask >> 3) & 0b1) as usize;
+                        ray_list_sizes[0] += left_hit_a as usize;
+                        ray_list_sizes[1] += right_hit_a as usize;
+
+                        if ray_idx_a != ray_idx_b {
+                            let left_hit_b = (mask >> 2) & 0b1;
+                            let right_hit_b = (mask >> 3) & 0b1;
+                            let left_first_b = if tnear[2] < tnear[3] { 1 } else { 0 };
+
+                            ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
+                            ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
+                            ray_list_sizes[0] += left_hit_b as usize;
+                            ray_list_sizes[1] += right_hit_b as usize;
+                        }
 
                         active_ray_idx += 2;
                     }
 
-                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
-                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
+                    if ray_list_sizes[2] - ray_list_sizes_orig[2] > 0 {
+                        stack.push((&children[0], 2, ray_list_sizes_orig[2]));
                     }
 
                     if ray_list_sizes[1] - ray_list_sizes_orig[1] > 0 {
                         stack.push((&children[1], 1, ray_list_sizes_orig[1]));
+                    }
+
+                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
+                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
                     }
                 }
                 BvhNode::Leaf { objects } => {
