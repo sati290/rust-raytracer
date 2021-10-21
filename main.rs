@@ -6,24 +6,26 @@ use bvh::{Bvh, TraceStats};
 use obj::Obj;
 use rayon::prelude::*;
 use std::time::Instant;
-use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4};
+use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4, Vec4};
 use wide::{f32x4, CmpGe, CmpLe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
 const PACKET_SIZE: u32 = 32;
 
+#[repr(C, align(16))]
 pub struct Ray {
-    origin: Vec3,
-    direction: Vec3,
-    direction_recip: Vec3,
+    origin_near: Vec4,         // x, y, z, near
+    direction_recip_far: Vec4, // x, y, z, far
+    direction: Vec4,
 }
 
 impl Ray {
     fn new(origin: &Vec3, direction: &Vec3) -> Self {
+        let dir_recip = Vec3::one() / *direction;
         Ray {
-            origin: *origin,
-            direction: *direction,
-            direction_recip: Vec3::one() / *direction,
+            origin_near: Vec4::new(origin.x, origin.y, origin.z, 0.),
+            direction: Vec4::from(*direction),
+            direction_recip_far: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, f32::INFINITY),
         }
     }
 }
@@ -163,25 +165,28 @@ impl Triangle {
 
 struct RayPacket<'a> {
     pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
-    rays: Vec<Ray>,
+    ray_directions: Vec<Vec3>,
     trace_stats: TraceStats,
     // shadow_rays_total: u32,
     // shadow_rays_active: u32,
 }
 
 impl<'a> RayPacket<'a> {
-    fn new(pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)], rays: Vec<Ray>) -> Self {
+    fn new(
+        pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+        ray_directions: Vec<Vec3>,
+    ) -> Self {
         let mut min = Vec2::broadcast(f32::INFINITY);
         let mut max = Vec2::broadcast(f32::NEG_INFINITY);
-        for r in &rays {
-            let uv = r.direction.xy() / r.direction.z;
+        for r in &ray_directions {
+            let uv = r.xy() / r.z;
             min = min.min_by_component(uv);
             max = max.max_by_component(uv);
         }
 
         RayPacket {
             pixels,
-            rays,
+            ray_directions,
             trace_stats: TraceStats::new(),
             // shadow_rays_total: 0,
             // shadow_rays_active: 0,
@@ -234,16 +239,16 @@ fn trace_packet<'a>(
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
-    let transformed_rays: Vec<_> = packet
-        .rays
+    let mut transformed_rays: Vec<_> = packet
+        .ray_directions
         .iter()
-        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * r.direction)))
+        .map(|r| Ray::new(cam_pos, &(cam_transform.rotation * *r)))
         .collect();
 
     let mut trace_results =
         [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
     bvh.trace_stream(
-        &transformed_rays,
+        &mut transformed_rays,
         &mut trace_results,
         &mut packet.trace_stats,
     );
@@ -266,10 +271,10 @@ fn trace_packet<'a>(
         }
 
         let rays = Vec3x4::from([
-            rays[0].direction,
-            rays[1].direction,
-            rays[2].direction,
-            rays[3].direction,
+            rays[0].direction.xyz(),
+            rays[1].direction.xyz(),
+            rays[2].direction.xyz(),
+            rays[3].direction.xyz(),
         ]);
 
         let hit_pos = cam_posx4 + rays * closest_hit;
@@ -301,10 +306,8 @@ fn trace_packet<'a>(
         let ndl: [f32; 4] = ndl.into();
         let mut color = Vec3::zero();
         for i in 0..4 {
-            if let Some(o) = closest_obj[i] {
-                if shadow_hit & 1 << i == 0 {
-                    color += Vec3::one() * ndl[i] / 4.;
-                }
+            if closest_obj[i].is_some() && shadow_hit & 1 << i == 0 {
+                color += Vec3::one() * ndl[i] / 4.;
             }
         }
 
@@ -387,8 +390,7 @@ fn main() {
                 .flat_map(|(x, y, _)| {
                     let camera_rays = &camera_rays;
                     let rays_index = get_camera_ray_index(*x, *y);
-                    (0..NUM_SUBSAMPLES)
-                        .map(move |i| Ray::new(&Vec3::zero(), &camera_rays[rays_index + i]))
+                    (0..NUM_SUBSAMPLES).map(move |i| camera_rays[rays_index + i])
                 })
                 .collect();
 
@@ -404,9 +406,21 @@ fn main() {
         PACKET_SIZE * PACKET_SIZE * NUM_SUBSAMPLES as u32
     );
 
+    let warmup_start = Instant::now();
+
+    let warmup_frames = 5;
+    for _ in 0..warmup_frames {
+        packets
+            .par_iter_mut()
+            .for_each(|packet| trace_packet(packet, &bvh, &cam_pos, &camera_transform, &light_pos));
+    }
+
+    let warmup_elapsed = warmup_start.elapsed();
+    println!("warmup {:.2?} for {} frames", warmup_elapsed, warmup_frames);
+
+    let frames = (15. / (warmup_elapsed.as_secs_f32() / warmup_frames as f32)).ceil() as u32;
     let time_start = Instant::now();
 
-    let frames = 20;
     for _ in 0..frames {
         packets
             .par_iter_mut()

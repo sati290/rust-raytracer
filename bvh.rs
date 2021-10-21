@@ -223,10 +223,12 @@ impl Bvh<'_> {
 
     pub fn trace_stream<'a>(
         &'a self,
-        rays: &[Ray],
+        rays: &mut [Ray],
         results: &mut [TraceResult<'a>],
         stats: &mut TraceStats,
     ) {
+        use safe_arch::*;
+
         let mut stack = ArrayVec::<_, 32>::new();
         let mut ray_lists = [
             vec![0; rays.len() * 32],
@@ -254,69 +256,158 @@ impl Bvh<'_> {
                 } => {
                     stats.inner_visit += 1;
 
+                    let bb_min_x = m128::from([
+                        child_bbox[0].min.x,
+                        child_bbox[1].min.x,
+                        child_bbox[0].min.x,
+                        child_bbox[1].min.x,
+                    ]);
+                    let bb_max_x = m128::from([
+                        child_bbox[0].max.x,
+                        child_bbox[1].max.x,
+                        child_bbox[0].max.x,
+                        child_bbox[1].max.x,
+                    ]);
+                    let bb_min_y = m128::from([
+                        child_bbox[0].min.y,
+                        child_bbox[1].min.y,
+                        child_bbox[0].min.y,
+                        child_bbox[1].min.y,
+                    ]);
+                    let bb_max_y = m128::from([
+                        child_bbox[0].max.y,
+                        child_bbox[1].max.y,
+                        child_bbox[0].max.y,
+                        child_bbox[1].max.y,
+                    ]);
+                    let bb_min_z = m128::from([
+                        child_bbox[0].min.z,
+                        child_bbox[1].min.z,
+                        child_bbox[0].min.z,
+                        child_bbox[1].min.z,
+                    ]);
+                    let bb_max_z = m128::from([
+                        child_bbox[0].max.z,
+                        child_bbox[1].max.z,
+                        child_bbox[0].max.z,
+                        child_bbox[1].max.z,
+                    ]);
+
                     let ray_list_sizes_orig = ray_list_sizes;
                     while active_ray_idx < last_active_ray_idx {
-                        let ray_indices = [
-                            ray_lists[list_idx][active_ray_idx] as usize,
-                            if active_ray_idx + 1 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 1]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                            if active_ray_idx + 2 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 2]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                            if active_ray_idx + 3 < last_active_ray_idx {
-                                ray_lists[list_idx][active_ray_idx + 3]
-                            } else {
-                                ray_lists[list_idx][active_ray_idx]
-                            } as usize,
-                        ];
-                        let origins = Vec3x4::from([
-                            rays[ray_indices[0]].origin,
-                            rays[ray_indices[1]].origin,
-                            rays[ray_indices[2]].origin,
-                            rays[ray_indices[3]].origin,
-                        ]);
-                        let directions_recip = Vec3x4::from([
-                            rays[ray_indices[0]].direction_recip,
-                            rays[ray_indices[1]].direction_recip,
-                            rays[ray_indices[2]].direction_recip,
-                            rays[ray_indices[3]].direction_recip,
-                        ]);
+                        let ray_idx_a = ray_lists[list_idx][active_ray_idx] as usize;
+                        let ray_idx_b = if active_ray_idx + 1 < last_active_ray_idx {
+                            ray_lists[list_idx][active_ray_idx + 1] as usize
+                        } else {
+                            ray_idx_a
+                        };
 
-                        let hit_left = child_bbox[0]
-                            .intersect_simd(&origins, &directions_recip)
-                            .move_mask();
-                        let hit_right = child_bbox[1]
-                            .intersect_simd(&origins, &directions_recip)
-                            .move_mask();
-                        for (i, ray_idx) in ray_indices
-                            .iter()
-                            .enumerate()
-                            .take(last_active_ray_idx - active_ray_idx)
-                        {
-                            if hit_left & 1 << i != 0 {
-                                ray_lists[0][ray_list_sizes[0]] = *ray_idx as u16;
-                                ray_list_sizes[0] += 1;
-                            }
-                            if hit_right & 1 << i != 0 {
-                                ray_lists[1][ray_list_sizes[1]] = *ray_idx as u16;
-                                ray_list_sizes[1] += 1;
-                            }
+                        let origin_xyz_near_a = m128::from(*rays[ray_idx_a].origin_near.as_array());
+                        let origin_xyz_near_b = m128::from(*rays[ray_idx_b].origin_near.as_array());
+
+                        let dir_recip_xyz_far_a =
+                            m128::from(*rays[ray_idx_a].direction_recip_far.as_array());
+                        let dir_recip_xyz_far_b =
+                            m128::from(*rays[ray_idx_b].direction_recip_far.as_array());
+
+                        let origin_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
+                        let origin_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
+                        let origin_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(
+                            origin_xyz_near_a,
+                            origin_xyz_near_b,
+                        );
+
+                        let dir_recip_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
+                        );
+                        let dir_recip_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
+                        );
+                        let dir_recip_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
+                        );
+
+                        let ray_far = shuffle_abi_f32_all_m128::<0b11_11_11_11>(
+                            dir_recip_xyz_far_a,
+                            dir_recip_xyz_far_b,
+                        );
+
+                        let origin_dir_recip_x = origin_x * dir_recip_x;
+                        let origin_dir_recip_y = origin_y * dir_recip_y;
+                        let origin_dir_recip_z = origin_z * dir_recip_z;
+
+                        let tx1 = fused_mul_sub_m128(bb_min_x, dir_recip_x, origin_dir_recip_x);
+                        let tx2 = fused_mul_sub_m128(bb_max_x, dir_recip_x, origin_dir_recip_x);
+                        let ty1 = fused_mul_sub_m128(bb_min_y, dir_recip_y, origin_dir_recip_y);
+                        let ty2 = fused_mul_sub_m128(bb_max_y, dir_recip_y, origin_dir_recip_y);
+                        let tz1 = fused_mul_sub_m128(bb_min_z, dir_recip_z, origin_dir_recip_z);
+                        let tz2 = fused_mul_sub_m128(bb_max_z, dir_recip_z, origin_dir_recip_z);
+
+                        let tnear = max_m128(
+                            max_m128(min_m128(tx1, tx2), min_m128(ty1, ty2)),
+                            min_m128(tz1, tz2),
+                        );
+                        let tfar = min_m128(
+                            min_m128(max_m128(tx1, tx2), max_m128(ty1, ty2)),
+                            max_m128(tz1, tz2),
+                        );
+
+                        let mask = move_mask_m128(cmp_ge_mask_m128(
+                            min_m128(tfar, ray_far),
+                            max_m128(tnear, zeroed_m128()),
+                        ));
+
+                        let left_first_mask = move_mask_m128(cmp_le_mask_m128(
+                            tnear,
+                            shuffle_abi_f32_all_m128::<0b11_11_01_01>(tnear, tnear),
+                        ));
+
+                        let left_hit_a = mask & 0b1;
+                        let right_hit_a = (mask >> 1) & 0b1;
+                        let left_first_a = left_first_mask & 0b1;
+
+                        ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
+                        ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
+                        ray_lists[2][ray_list_sizes[2]] = ray_idx_a as u16;
+                        ray_list_sizes[0] += (left_hit_a & left_first_a) as usize;
+                        ray_list_sizes[1] += right_hit_a as usize;
+                        ray_list_sizes[2] += (left_hit_a & (left_first_a ^ 0b1)) as usize;
+
+                        if ray_idx_a != ray_idx_b {
+                            let left_hit_b = (mask >> 2) & 0b1;
+                            let right_hit_b = (mask >> 3) & 0b1;
+                            let left_first_b = (left_first_mask >> 2) & 0b1;
+
+                            ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
+                            ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
+                            ray_lists[2][ray_list_sizes[2]] = ray_idx_b as u16;
+                            ray_list_sizes[0] += (left_hit_b & left_first_b) as usize;
+                            ray_list_sizes[1] += right_hit_b as usize;
+                            ray_list_sizes[2] += (left_hit_b & (left_first_b ^ 0b1)) as usize;
                         }
 
-                        active_ray_idx += 4;
+                        active_ray_idx += 2;
                     }
 
-                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
-                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
+                    if ray_list_sizes[2] - ray_list_sizes_orig[2] > 0 {
+                        stack.push((&children[0], 2, ray_list_sizes_orig[2]));
                     }
 
                     if ray_list_sizes[1] - ray_list_sizes_orig[1] > 0 {
                         stack.push((&children[1], 1, ray_list_sizes_orig[1]));
+                    }
+
+                    if ray_list_sizes[0] - ray_list_sizes_orig[0] > 0 {
+                        stack.push((&children[0], 0, ray_list_sizes_orig[0]));
                     }
                 }
                 BvhNode::Leaf { objects } => {
@@ -336,16 +427,16 @@ impl Bvh<'_> {
                             *ray_indices.get(3).unwrap_or(&ray_indices[0]) as usize,
                         ];
                         let ray_origins = Vec3x4::from([
-                            rays[ray_indices_padded[0]].origin,
-                            rays[ray_indices_padded[1]].origin,
-                            rays[ray_indices_padded[2]].origin,
-                            rays[ray_indices_padded[3]].origin,
+                            rays[ray_indices_padded[0]].origin_near.xyz(),
+                            rays[ray_indices_padded[1]].origin_near.xyz(),
+                            rays[ray_indices_padded[2]].origin_near.xyz(),
+                            rays[ray_indices_padded[3]].origin_near.xyz(),
                         ]);
                         let ray_directions = Vec3x4::from([
-                            rays[ray_indices_padded[0]].direction,
-                            rays[ray_indices_padded[1]].direction,
-                            rays[ray_indices_padded[2]].direction,
-                            rays[ray_indices_padded[3]].direction,
+                            rays[ray_indices_padded[0]].direction.xyz(),
+                            rays[ray_indices_padded[1]].direction.xyz(),
+                            rays[ray_indices_padded[2]].direction.xyz(),
+                            rays[ray_indices_padded[3]].direction.xyz(),
                         ]);
 
                         for obj in objects
@@ -356,7 +447,10 @@ impl Bvh<'_> {
 
                             let hit: [f32; 4] = hit.into();
                             for (&i, hit) in ray_indices.iter().zip(hit) {
-                                results[i as usize].add_hit(hit, obj);
+                                let ray = &mut rays[i as usize];
+                                let result = &mut results[i as usize];
+                                result.add_hit(hit, obj);
+                                ray.direction_recip_far.w = result.hit_dist;
                             }
                         }
                     }
