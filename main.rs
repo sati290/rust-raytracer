@@ -1,13 +1,15 @@
 mod aabb;
 mod bvh;
+mod triangle;
 
-use aabb::Aabb;
+use image::RgbImage;
+use triangle::Triangle;
 use bvh::{Bvh, TraceStats};
 use obj::Obj;
 use rayon::prelude::*;
 use std::time::Instant;
 use ultraviolet::{Isometry3, Mat3, Rotor3, Vec2, Vec3, Vec3x4, Vec4};
-use wide::{f32x4, CmpGe, CmpLe, CmpLt};
+use wide::{f32x4, CmpGe, CmpLt};
 
 const NUM_SUBSAMPLES: usize = 4;
 const PACKET_SIZE: u32 = 32;
@@ -28,6 +30,11 @@ impl Ray {
             direction_recip_far: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, f32::INFINITY),
         }
     }
+}
+
+struct RayInfo {
+    contribution: Vec3,
+    destination_idx: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -79,117 +86,24 @@ impl<'a> TraceResultSimd<'a> {
     }
 }
 
-pub struct Triangle {
-    verts: [Vec3; 3],
-    normal: Vec3,
-}
-
-impl Triangle {
-    pub fn new(verts: [Vec3; 3]) -> Self {
-        let v0v1 = verts[1] - verts[0];
-        let v0v2 = verts[2] - verts[0];
-        let normal = v0v2.cross(v0v1).normalized();
-
-        Triangle { verts, normal }
-    }
-
-    pub fn aabb(&self) -> Aabb {
-        let mut aabb = Aabb::empty();
-
-        for v in self.verts {
-            aabb.grow_mut(v);
-        }
-
-        aabb
-    }
-
-    pub fn centroid(&self) -> Vec3 {
-        (self.verts[0] + self.verts[1] + self.verts[2]) / 3.
-    }
-
-    fn intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
-        let v0v1 = self.verts[1] - self.verts[0];
-        let v0v2 = self.verts[2] - self.verts[0];
-        let pvec = ray_direction.cross(v0v1);
-        let det = v0v2.dot(pvec);
-
-        let epsilon = 0.0000001;
-        if det < epsilon {
-            return None;
-        }
-
-        let inv_det = 1. / det;
-
-        let tvec = *ray_origin - self.verts[0];
-        let u = tvec.dot(pvec) * inv_det;
-        if !(0. ..=1.).contains(&u) {
-            return None;
-        }
-
-        let qvec = tvec.cross(v0v2);
-        let v = ray_direction.dot(qvec) * inv_det;
-        if !(0. ..=1.).contains(&v) {
-            return None;
-        }
-
-        let t = v0v1.dot(qvec) * inv_det;
-
-        Some(t)
-    }
-
-    fn intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
-        let v0v1 = Vec3x4::splat(self.verts[1] - self.verts[0]);
-        let v0v2 = Vec3x4::splat(self.verts[2] - self.verts[0]);
-        let pvec = ray_direction.cross(v0v1);
-        let det = v0v2.dot(pvec);
-
-        let epsilon = f32x4::splat(0.0000001);
-        let det_valid = det.cmp_ge(epsilon);
-
-        let inv_det = 1. / det;
-
-        let tvec = *ray_origin - Vec3x4::splat(self.verts[0]);
-        let u = tvec.dot(pvec) * inv_det;
-        let u_valid = u.cmp_ge(0.) & u.cmp_le(1.);
-
-        let qvec = tvec.cross(v0v2);
-        let v = ray_direction.dot(qvec) * inv_det;
-        let v_valid = v.cmp_ge(0.) & v.cmp_le(1.);
-
-        let t = v0v1.dot(qvec) * inv_det;
-
-        let t_valid = det_valid & u_valid & v_valid;
-        t_valid.blend(t, f32x4::splat(f32::INFINITY))
-    }
-}
-
 struct RayPacket<'a> {
-    pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+    pixels: &'a mut [(usize, Vec3)],
     ray_directions: Vec<Vec3>,
+    ray_infos: Vec<RayInfo>,
     trace_stats: TraceStats,
-    // shadow_rays_total: u32,
-    // shadow_rays_active: u32,
 }
 
 impl<'a> RayPacket<'a> {
     fn new(
-        pixels: &'a mut [(u32, u32, &'a mut image::Rgb<u8>)],
+        pixels: &'a mut [(usize, Vec3)],
         ray_directions: Vec<Vec3>,
+        ray_infos: Vec<RayInfo>,
     ) -> Self {
-        let mut min = Vec2::broadcast(f32::INFINITY);
-        let mut max = Vec2::broadcast(f32::NEG_INFINITY);
-        for r in &ray_directions {
-            let uv = r.xy() / r.z;
-            min = min.min_by_component(uv);
-            max = max.max_by_component(uv);
-        }
-
         RayPacket {
             pixels,
             ray_directions,
+            ray_infos,
             trace_stats: TraceStats::new(),
-            // shadow_rays_total: 0,
-            // shadow_rays_active: 0,
         }
     }
 }
@@ -229,6 +143,11 @@ fn generate_camera_rays(image_width: u32, image_height: u32, horiz_fog_deg: f32)
     rays
 }
 
+fn brdf(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
+    let ndotl = normal.dot(dir_in);
+    return Vec3x4::one() * ndotl.max(f32x4::ZERO);
+}
+
 fn trace_packet<'a>(
     packet: &mut RayPacket<'a>,
     bvh: &'a Bvh,
@@ -236,6 +155,8 @@ fn trace_packet<'a>(
     cam_transform: &Isometry3,
     light_pos: &Vec3,
 ) {
+    packet.pixels.iter_mut().for_each(|(_, color)| *color = Vec3::zero());
+
     let cam_posx4 = Vec3x4::splat(*cam_pos);
     let light_posx4 = Vec3x4::splat(*light_pos);
 
@@ -253,18 +174,20 @@ fn trace_packet<'a>(
         &mut packet.trace_stats,
     );
 
-    for ((_x, _y, pixel), (rays, results)) in packet.pixels.iter_mut().zip(
-        transformed_rays
-            .chunks_exact(NUM_SUBSAMPLES)
-            .zip(trace_results.chunks_exact(NUM_SUBSAMPLES)),
-    ) {
+    let mut shadow_rays = Vec::with_capacity(transformed_rays.len());
+    let mut shadow_ray_infos = Vec::with_capacity(transformed_rays.len());
+    
+    for ((ray_infos, rays), results) in packet.ray_infos.chunks_exact_mut(4)
+        .zip(transformed_rays.chunks_exact(4))
+        .zip(trace_results.chunks_exact(4))
+    {
         let closest_hit = f32x4::from([
             results[0].hit_dist,
             results[1].hit_dist,
             results[2].hit_dist,
             results[3].hit_dist,
         ]);
-
+        
         let hit_mask = closest_hit.cmp_lt(f32::INFINITY).move_mask();
         if hit_mask == 0 {
             continue;
@@ -278,40 +201,53 @@ fn trace_packet<'a>(
         ]);
 
         let hit_pos = cam_posx4 + rays * closest_hit;
-
-        let shadow_ray = (light_posx4 - hit_pos).normalized();
-        let shadow_hit = bvh.trace_shadow(&hit_pos, &shadow_ray, hit_mask);
-        // packet.shadow_rays_total += 4;
-        // packet.shadow_rays_active += closest_hit.cmp_lt(f32::INFINITY).move_mask().count_ones();
-
-        if shadow_hit == 0b1111 {
-            continue;
-        }
-        let closest_obj = [
-            results[0].object,
-            results[1].object,
-            results[2].object,
-            results[3].object,
-        ];
+        let shadow_ray_dirs = (light_posx4 - hit_pos).normalized();
 
         let normal = Vec3x4::from([
-            closest_obj[0].map_or(Vec3::zero(), |o| o.normal),
-            closest_obj[1].map_or(Vec3::zero(), |o| o.normal),
-            closest_obj[2].map_or(Vec3::zero(), |o| o.normal),
-            closest_obj[3].map_or(Vec3::zero(), |o| o.normal),
+            results[0].object.map_or(Vec3::zero(), |o| o.normal),
+            results[1].object.map_or(Vec3::zero(), |o| o.normal),
+            results[2].object.map_or(Vec3::zero(), |o| o.normal),
+            results[3].object.map_or(Vec3::zero(), |o| o.normal),
         ]);
 
-        let light_dir = (light_posx4 - hit_pos).normalized();
-        let ndl = light_dir.dot(normal);
-        let ndl: [f32; 4] = ndl.into();
-        let mut color = Vec3::zero();
+        let ratio = brdf(shadow_ray_dirs, -rays, normal);
+        let hit_pos: [Vec3; 4] = hit_pos.into();
+        let shadow_ray_dirs: [Vec3; 4] = shadow_ray_dirs.into();
+        let ratio: [Vec3; 4] = ratio.into();
         for i in 0..4 {
-            if closest_obj[i].is_some() && shadow_hit & 1 << i == 0 {
-                color += Vec3::one() * ndl[i] / 4.;
+            if hit_mask & (1 << i) != 0 {
+                shadow_rays.push(Ray::new(&hit_pos[i], &shadow_ray_dirs[i]));
+                shadow_ray_infos.push(RayInfo {
+                    contribution: ray_infos[i].contribution * ratio[i],
+                    destination_idx: ray_infos[i].destination_idx,
+                });
             }
         }
+    }
 
-        **pixel = color_vec_to_rgb(color);
+    trace_results = [TraceResult::new(); PACKET_SIZE as usize * PACKET_SIZE as usize * NUM_SUBSAMPLES];
+    bvh.trace_stream(&mut shadow_rays, &mut trace_results, &mut packet.trace_stats);
+
+    for (ray_infos, results) in shadow_ray_infos.chunks_exact_mut(4).zip(trace_results.chunks_exact(4))
+    {
+        let closest_hit = f32x4::from([
+            results[0].hit_dist,
+            results[1].hit_dist,
+            results[2].hit_dist,
+            results[3].hit_dist,
+        ]);
+
+        let hit_mask = closest_hit.cmp_lt(f32::INFINITY).move_mask();
+
+        if hit_mask == 0b1111 {
+            continue;
+        }
+
+        for i in 0..4 {
+            if hit_mask & (1 << i) == 0 {
+                packet.pixels[ray_infos[i].destination_idx].1 += ray_infos[i].contribution;
+            }
+        }
     }
 }
 
@@ -370,32 +306,35 @@ fn main() {
     let light_pos = Vec3::new(5000., 5000., -10000.);
     let image_width = 1920;
     let image_height = 1080;
-    let mut image = image::RgbImage::new(image_width, image_height);
 
     let camera_transform = Isometry3::new(cam_pos, look_at(&cam_pos, &cam_target));
 
     let camera_rays = generate_camera_rays(image_width, image_height, 90.);
-    let get_camera_ray_index = |x: u32, y: u32| {
-        y as usize * image_width as usize * NUM_SUBSAMPLES + x as usize * NUM_SUBSAMPLES
-    };
 
-    let mut pixels: Vec<_> = image.enumerate_pixels_mut().collect();
-
-    pixels.sort_by_key(|(x, y, _)| (y / PACKET_SIZE, x / PACKET_SIZE, *y, *x));
+    let mut pixels: Vec<_> = (0..(image_width * image_height) as usize).map(|i| (i, Vec3::zero())).collect();
 
     let mut packets: Vec<_> = pixels
         .chunks_mut((PACKET_SIZE * PACKET_SIZE) as usize)
         .map(|pixels| {
             let rays = pixels
                 .iter()
-                .flat_map(|(x, y, _)| {
+                .flat_map(|(i, _)| {
                     let camera_rays = &camera_rays;
-                    let rays_index = get_camera_ray_index(*x, *y);
+                    let rays_index = i * NUM_SUBSAMPLES;//get_camera_ray_index(*x, *y);
                     (0..NUM_SUBSAMPLES).map(move |i| camera_rays[rays_index + i])
                 })
                 .collect();
+            
+            let ray_infos = (0..pixels.len())
+                .flat_map(|i|
+                    (0..NUM_SUBSAMPLES).map(move |_| RayInfo {
+                        contribution: Vec3::broadcast(1. / (NUM_SUBSAMPLES as f32)),
+                        destination_idx: i,
+                    })
+                )
+                .collect();
 
-            RayPacket::new(pixels, rays)
+            RayPacket::new(pixels, rays, ray_infos)
         })
         .collect();
 
@@ -436,13 +375,11 @@ fn main() {
         elapsed / frames
     );
 
-    // let shadow_rays_total = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_total);
-    // let shadow_rays_active = packets.iter().fold(0, |acc, x| acc + x.shadow_rays_active);
-    // println!("shadow trace simd utilization {}%", shadow_rays_active as f32 / shadow_rays_total as f32 * 100.);
     let trace_stats = packets
         .iter()
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     println!("{:?}", trace_stats);
 
+    let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb(pixels[(y * image_width + x) as usize].1));
     image.save("output.png").unwrap();
 }

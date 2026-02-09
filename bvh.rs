@@ -2,9 +2,10 @@ use std::ops::Add;
 use std::ops::Range;
 
 use crate::aabb::Aabb;
+use crate::triangle::Triangle;
 use crate::Vec3;
 use crate::Vec3x4;
-use crate::{Ray, TraceResult, Triangle};
+use crate::{Ray, TraceResult};
 use arrayvec::ArrayVec;
 use wide::CmpLt;
 
