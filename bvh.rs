@@ -414,8 +414,9 @@ impl Bvh<'_> {
                     stats.leaf_visit += 1;
                     stats.obj_intersect +=
                         ((last_active_ray_idx - active_ray_idx) * objects.len()) as u32;
-                    stats.obj_intersect_skipped +=
-                        stats.obj_intersect - rays.len() as u32 * objects.len() as u32;
+                    // TODO: crashes
+                    // stats.obj_intersect_skipped +=
+                    //     stats.obj_intersect - rays.len() as u32 * objects.len() as u32;
 
                     for ray_indices in
                         ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)

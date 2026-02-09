@@ -318,7 +318,8 @@ fn trace_packet<'a>(
 fn load_scene() -> Vec<Triangle> {
     let load_start = Instant::now();
 
-    let obj = Obj::load("./asian_dragon_obj/asian_dragon.obj").unwrap();
+    // Model from http://graphics.stanford.edu/data/3Dscanrep/
+    let obj = Obj::load("./data/asian_dragon_obj/asian_dragon.obj").unwrap();
 
     let mut triangles = vec![];
     for o in &obj.data.objects {
