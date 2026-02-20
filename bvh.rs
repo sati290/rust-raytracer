@@ -184,11 +184,11 @@ impl Bvh<'_> {
         use safe_arch::*;
 
         let mut stack = ArrayVec::<_, 64>::new();
-        let mut ray_lists = [
-            vec![0; rays.len() * 32],
-            vec![0; rays.len() * 32],
-            vec![0; rays.len() * 32],
-        ];
+        let ray_list_len = rays.len() * 32;
+        let mut ray_list_vec = vec![0; ray_list_len * 3];
+        let (rl1, rest) = ray_list_vec.split_at_mut(ray_list_len);
+        let (rl2, rl3) = rest.split_at_mut(ray_list_len);
+        let ray_lists = [rl1, rl2, rl3];
         let mut ray_list_sizes = [0; 3];
         
         for (i, item) in ray_lists[0].iter_mut().enumerate().take(rays.len()) {
