@@ -5,9 +5,8 @@ use crate::aabb::Aabb;
 use crate::triangle::Triangle;
 use crate::Vec3;
 use crate::Vec3x4;
-use crate::{Ray, TraceResult};
+use crate::{Ray};
 use arrayvec::ArrayVec;
-use wide::CmpLt;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TraceStats {
@@ -58,7 +57,7 @@ pub struct Bvh<'a> {
 }
 
 impl Bvh<'_> {
-    pub fn build(objects: &[Triangle]) -> Bvh {
+    pub fn build(objects: &[Triangle]) -> Bvh<'_> {
         let mut object_indices: Vec<_> = (0..objects.len()).collect();
         let object_bounds: Vec<_> = objects.iter().map(|o| (o.centroid(), o.aabb())).collect();
         let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds);
@@ -175,71 +174,25 @@ impl Bvh<'_> {
         }
     }
 
-    pub fn trace_shadow(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4, ray_mask: i32) -> i32 {
-        let ray_direction_recip = Vec3x4::splat(Vec3::broadcast(1.)) / *ray_direction;
-        let mut result = !ray_mask;
-        let mut stack = ArrayVec::<_, 32>::new();
-
-        stack.push(&self.root_node);
-        while let Some(node) = stack.pop() {
-            match node {
-                BvhNode::Inner {
-                    child_bbox,
-                    children,
-                } => {
-                    if child_bbox[0]
-                        .intersect_simd(ray_origin, &ray_direction_recip)
-                        .move_mask()
-                        & !result
-                        != 0
-                    {
-                        stack.push(&children[0]);
-                    };
-                    if child_bbox[1]
-                        .intersect_simd(ray_origin, &ray_direction_recip)
-                        .move_mask()
-                        & !result
-                        != 0
-                    {
-                        stack.push(&children[1]);
-                    };
-                }
-                BvhNode::Leaf { objects } => {
-                    for obj in objects
-                        .clone()
-                        .map(|i| &self.objects[self.object_indices[i]])
-                    {
-                        let hit = obj.intersect_simd::<false>(ray_origin, ray_direction);
-                        result |= hit.cmp_lt(f32::INFINITY).move_mask();
-                        if result == 0b1111 {
-                            return result;
-                        }
-                    }
-                }
-            }
-        }
-
-        result
-    }
-
     pub fn trace_stream<'a>(
         &'a self,
         rays: &mut [Ray],
-        results: &mut [TraceResult<'a>],
+        hit_objects: &mut [Option<&'a Triangle>],
         stats: &mut TraceStats,
     ) {
+        assert!(rays.len() <= u16::MAX as usize);
         use safe_arch::*;
 
-        let mut stack = ArrayVec::<_, 32>::new();
+        let mut stack = ArrayVec::<_, 64>::new();
         let mut ray_lists = [
             vec![0; rays.len() * 32],
             vec![0; rays.len() * 32],
             vec![0; rays.len() * 32],
         ];
         let mut ray_list_sizes = [0; 3];
-
-        for i in 0..rays.len() {
-            ray_lists[0][i] = i as u16;
+        
+        for (i, item) in ray_lists[0].iter_mut().enumerate().take(rays.len()) {
+            *item = i as u16;
         }
         ray_list_sizes[0] = rays.len();
         stack.push((&self.root_node, 0, 0));
@@ -450,9 +403,10 @@ impl Bvh<'_> {
                             let hit: [f32; 4] = hit.into();
                             for (&i, hit) in ray_indices.iter().zip(hit) {
                                 let ray = &mut rays[i as usize];
-                                let result = &mut results[i as usize];
-                                result.add_hit(hit, obj);
-                                ray.direction_recip_far.w = result.hit_dist;
+                                if hit < ray.direction_recip_far.w {
+                                    ray.direction_recip_far.w = hit;
+                                    hit_objects[i as usize] = Some(obj);
+                                }
                             }
                         }
                     }
