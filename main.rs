@@ -87,44 +87,45 @@ fn trace_batch(
         **p = Vec3::zero();
     }
 
-    let mut camera_rays = camera.generate_rays(&batch.region);
-
+    let mut rays = camera.generate_rays(&batch.region);
     let mut ray_infos = Vec::with_capacity(batch.pixels.len() * NUM_SUBSAMPLES);
-    for i in 0..camera_rays.len() {
+    for i in 0..rays.len() {
         ray_infos.push(PathInfo {
             contribution: Vec3::one() / NUM_SUBSAMPLES as f32,
             destination_idx: i / NUM_SUBSAMPLES,
         });
     }
 
-    let mut hit_objects = vec![None; camera_rays.len()];
+    let mut hit_objects = vec![None; rays.len()];
     bvh.trace_stream(
-        &mut camera_rays,
+        &mut rays,
         &mut hit_objects,
         &mut batch.trace_stats,
     );
 
-    let mut shadow_rays = Vec::with_capacity(camera_rays.len());
-    let mut shadow_ray_infos = Vec::with_capacity(camera_rays.len());
-    for ((ray_info, ray), hit_object_idx) in ray_infos.into_iter().zip(camera_rays.into_iter()).zip(hit_objects.iter()) {
-        let hit_obj = hit_object_idx.map(|i| &objects[i]);
-        if let Some(hit) = hit_obj {
+    let mut new_rays_len = 0;
+    for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
+        if let &Some(hit_obj_idx) = hit_obj_idx {
+            let ray = &rays[i];
+            let path_info = &ray_infos[i];
+            let hit_obj = &objects[hit_obj_idx];
             let hit_pos = ray.hit_pos();
             let shadow_ray_dir = (*light_pos - hit_pos).normalized();
-            let brdf = brdf(shadow_ray_dir, -ray.direction.xyz(), hit.normal);
-            shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir));
-            shadow_ray_infos.push(PathInfo {
-                contribution: ray_info.contribution * brdf,
-                destination_idx: ray_info.destination_idx,
-            });
+            let brdf = brdf(shadow_ray_dir, -ray.direction.xyz(), hit_obj.normal);
+            rays[new_rays_len] = Ray::new(&hit_pos, &shadow_ray_dir);
+            ray_infos[new_rays_len] = PathInfo { contribution: path_info.contribution * brdf, ..*path_info };
+            new_rays_len += 1;
         }
     }
-    
-    hit_objects.clear();
-    hit_objects.resize(shadow_rays.len(), None);
-    bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
 
-    for (ray_info, ray) in shadow_ray_infos.into_iter().zip(shadow_rays.into_iter()) {
+    rays.truncate(new_rays_len);
+    ray_infos.truncate(new_rays_len);
+
+    hit_objects.clear();
+    hit_objects.resize(rays.len(), None);
+    bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
+
+    for (ray_info, ray) in ray_infos.into_iter().zip(rays.into_iter()) {
         if ray.hit_dist() == f32::INFINITY {
             *batch.pixels[ray_info.destination_idx] += ray_info.contribution;
         }
