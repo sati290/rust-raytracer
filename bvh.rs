@@ -10,24 +10,30 @@ use crate::{Ray};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TraceStats {
-    pub inner_visit: u32,
-    pub leaf_visit: u32,
-    pub obj_intersect: u32,
-    pub obj_intersect_skipped: u32,
-    pub leaf_rays: u32,
-    pub leaf_objs: u32,
+    total_rays: u32,
+    inner_visit: u32,
+    leaf_visit: u32,
+    obj_intersect: u32,
+    leaf_rays: u32,
+    leaf_objs: u32,
 }
 
 impl TraceStats {
     pub fn new() -> Self {
         TraceStats {
+            total_rays: 0,
             inner_visit: 0,
             leaf_visit: 0,
             obj_intersect: 0,
-            obj_intersect_skipped: 0,
             leaf_rays: 0,
             leaf_objs: 0
         }
+    }
+
+    pub fn print(&self) {
+        println!("{:?}", self);
+        println!("avg {} rays {} objs per leaf visit", self.leaf_rays / self.leaf_visit, self.leaf_objs / self.leaf_visit);
+        println!("{} intersects per ray", self.obj_intersect as f32 / self.total_rays as f32);
     }
 }
 
@@ -36,13 +42,33 @@ impl Add for TraceStats {
 
     fn add(self, rhs: Self) -> Self::Output {
         TraceStats {
+            total_rays: self.total_rays + rhs.total_rays,
             inner_visit: self.inner_visit + rhs.inner_visit,
             leaf_visit: self.leaf_visit + rhs.leaf_visit,
             obj_intersect: self.obj_intersect + rhs.obj_intersect,
-            obj_intersect_skipped: self.obj_intersect_skipped + rhs.obj_intersect_skipped,
             leaf_rays: self.leaf_rays + rhs.leaf_rays,
             leaf_objs: self.leaf_objs + rhs.leaf_objs,
         }
+    }
+}
+
+#[derive(Debug)]
+struct BvhStats {
+    num_leaves: u32,
+    max_depth: u32
+}
+
+impl BvhStats {
+    fn new () -> Self {
+        BvhStats {
+            num_leaves: 0,
+            max_depth: 0
+        }
+    }
+
+    fn add_leaf(&mut self, depth: u32) {
+        self.num_leaves += 1;
+        self.max_depth = self.max_depth.max(depth);
     }
 }
 
@@ -66,7 +92,10 @@ impl Bvh {
     pub fn build(objects: &[Triangle]) -> Bvh {
         let mut object_indices: Vec<_> = (0..objects.len()).collect();
         let object_bounds: Vec<_> = objects.iter().map(|o| (o.centroid(), o.aabb())).collect();
-        let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds);
+
+        let mut stats = BvhStats::new();
+        let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds, 0, &mut stats);
+        println!("{:?}", stats);
 
         let triangles = object_indices.iter().map(|&idx| TriangleOpt::from(&objects[idx])).collect();
 
@@ -81,10 +110,16 @@ impl Bvh {
         indices: &mut [usize],
         indices_start_idx: usize,
         object_bounds: &[(Vec3, Aabb)],
+        depth: u32,
+        stats: &mut BvhStats,
     ) -> BvhNode {
         match indices.len() {
-            1..=8 => BvhNode::Leaf {
-                triangles_range: indices_start_idx..indices_start_idx + indices.len(),
+            1..=8 => {
+                stats.add_leaf(depth);
+
+                BvhNode::Leaf {
+                    triangles_range: indices_start_idx..indices_start_idx + indices.len(),
+                }
             },
             _ => {
                 let mut bounds = Aabb::empty();
@@ -167,11 +202,13 @@ impl Bvh {
                 let (indices_left, indices_right) = indices.split_at_mut(split_idx);
 
                 let child_left =
-                    Bvh::build_recursive(indices_left, indices_start_idx, object_bounds);
+                    Bvh::build_recursive(indices_left, indices_start_idx, object_bounds, depth + 1, stats);
                 let child_right = Bvh::build_recursive(
                     indices_right,
                     indices_start_idx + split_idx,
                     object_bounds,
+                    depth + 1,
+                    stats
                 );
 
                 BvhNode::Inner {
@@ -190,6 +227,8 @@ impl Bvh {
     ) {
         assert!(rays.len() <= u16::MAX as usize);
         use safe_arch::*;
+
+        stats.total_rays += rays.len() as u32;
 
         let mut stack = ArrayVec::<_, 64>::new();
         let ray_list_len = rays.len() * 32;

@@ -267,8 +267,7 @@ fn main() {
     let trace_stats = batches
         .iter()
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
-    println!("{:?}", trace_stats);
-    println!("avg {} rays {} objs per leaf visit", trace_stats.leaf_rays / trace_stats.leaf_visit, trace_stats.leaf_objs / trace_stats.leaf_visit);
+    trace_stats.print();
 
     let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb(pixels[(y * image_width + x) as usize]));
     let now = Local::now();
