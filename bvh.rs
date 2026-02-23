@@ -1,19 +1,21 @@
 use std::ops::Add;
 use std::ops::Range;
+use arrayvec::ArrayVec;
+use ultraviolet::{Vec3, Vec3x4};
 
 use crate::aabb::Aabb;
 use crate::triangle::Triangle;
-use crate::Vec3;
-use crate::Vec3x4;
+use crate::triangle_opt::TriangleOpt;
 use crate::{Ray};
-use arrayvec::ArrayVec;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TraceStats {
-    inner_visit: u32,
-    leaf_visit: u32,
-    obj_intersect: u32,
-    obj_intersect_skipped: u32,
+    pub inner_visit: u32,
+    pub leaf_visit: u32,
+    pub obj_intersect: u32,
+    pub obj_intersect_skipped: u32,
+    pub leaf_rays: u32,
+    pub leaf_objs: u32,
 }
 
 impl TraceStats {
@@ -23,6 +25,8 @@ impl TraceStats {
             leaf_visit: 0,
             obj_intersect: 0,
             obj_intersect_skipped: 0,
+            leaf_rays: 0,
+            leaf_objs: 0
         }
     }
 }
@@ -36,6 +40,8 @@ impl Add for TraceStats {
             leaf_visit: self.leaf_visit + rhs.leaf_visit,
             obj_intersect: self.obj_intersect + rhs.obj_intersect,
             obj_intersect_skipped: self.obj_intersect_skipped + rhs.obj_intersect_skipped,
+            leaf_rays: self.leaf_rays + rhs.leaf_rays,
+            leaf_objs: self.leaf_objs + rhs.leaf_objs,
         }
     }
 }
@@ -46,24 +52,26 @@ enum BvhNode {
         children: [Box<BvhNode>; 2],
     },
     Leaf {
-        objects: Range<usize>,
+        triangles_range: Range<usize>,
     },
 }
 
-pub struct Bvh<'a> {
-    objects: &'a [Triangle],
+pub struct Bvh {
+    triangles: Vec<TriangleOpt>,
     object_indices: Vec<usize>,
     root_node: BvhNode,
 }
 
-impl Bvh<'_> {
-    pub fn build(objects: &[Triangle]) -> Bvh<'_> {
+impl Bvh {
+    pub fn build(objects: &[Triangle]) -> Bvh {
         let mut object_indices: Vec<_> = (0..objects.len()).collect();
         let object_bounds: Vec<_> = objects.iter().map(|o| (o.centroid(), o.aabb())).collect();
         let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds);
 
+        let triangles = object_indices.iter().map(|&idx| TriangleOpt::from(&objects[idx])).collect();
+
         Bvh {
-            objects,
+            triangles,
             object_indices,
             root_node,
         }
@@ -76,7 +84,7 @@ impl Bvh<'_> {
     ) -> BvhNode {
         match indices.len() {
             1..=8 => BvhNode::Leaf {
-                objects: indices_start_idx..indices_start_idx + indices.len(),
+                triangles_range: indices_start_idx..indices_start_idx + indices.len(),
             },
             _ => {
                 let mut bounds = Aabb::empty();
@@ -174,10 +182,10 @@ impl Bvh<'_> {
         }
     }
 
-    pub fn trace_stream<'a>(
-        &'a self,
+    pub fn trace_stream(
+        &self,
         rays: &mut [Ray],
-        hit_objects: &mut [Option<&'a Triangle>],
+        hit_objects: &mut [Option<usize>],
         stats: &mut TraceStats,
     ) {
         assert!(rays.len() <= u16::MAX as usize);
@@ -364,51 +372,54 @@ impl Bvh<'_> {
                         stack.push((&children[0], 0, ray_list_sizes_orig[0]));
                     }
                 }
-                BvhNode::Leaf { objects } => {
+                BvhNode::Leaf { triangles_range } => {
                     stats.leaf_visit += 1;
                     stats.obj_intersect +=
-                        ((last_active_ray_idx - active_ray_idx) * objects.len()) as u32;
+                        ((last_active_ray_idx - active_ray_idx) * triangles_range.len()) as u32;
                     // TODO: crashes
                     // stats.obj_intersect_skipped +=
-                    //     stats.obj_intersect - rays.len() as u32 * objects.len() as u32;
+                    //     stats.obj_intersect - rays.len() as u32 * triangles_range.len() as u32;
+                    stats.leaf_rays += (last_active_ray_idx - active_ray_idx) as u32;
+                    stats.leaf_objs += triangles_range.len() as u32;
 
-                    for ray_indices in
-                        ray_lists[list_idx][active_ray_idx..last_active_ray_idx].chunks(4)
-                    {
-                        let ray_indices_padded = [
-                            ray_indices[0] as usize,
-                            *ray_indices.get(1).unwrap_or(&ray_indices[0]) as usize,
-                            *ray_indices.get(2).unwrap_or(&ray_indices[0]) as usize,
-                            *ray_indices.get(3).unwrap_or(&ray_indices[0]) as usize,
-                        ];
-                        let ray_origins = Vec3x4::from([
-                            rays[ray_indices_padded[0]].origin_near.xyz(),
-                            rays[ray_indices_padded[1]].origin_near.xyz(),
-                            rays[ray_indices_padded[2]].origin_near.xyz(),
-                            rays[ray_indices_padded[3]].origin_near.xyz(),
-                        ]);
-                        let ray_directions = Vec3x4::from([
-                            rays[ray_indices_padded[0]].direction.xyz(),
-                            rays[ray_indices_padded[1]].direction.xyz(),
-                            rays[ray_indices_padded[2]].direction.xyz(),
-                            rays[ray_indices_padded[3]].direction.xyz(),
-                        ]);
+                    self.intersect_objs(triangles_range.clone(), &ray_lists[list_idx][active_ray_idx..last_active_ray_idx], rays, hit_objects);
+                }
+            }
+        }
+    }
 
-                        for obj in objects
-                            .clone()
-                            .map(|i| &self.objects[self.object_indices[i]])
-                        {
-                            let hit = obj.intersect_simd::<false>(&ray_origins, &ray_directions);
+    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[u16], rays: &mut [Ray], hit_objects: &mut [Option<usize>]) {
+        for ray_chunk_indices in ray_indices.chunks(4)
+        {
+            let ray_indices_padded = [
+                ray_chunk_indices[0] as usize,
+                *ray_chunk_indices.get(1).unwrap_or(&ray_chunk_indices[0]) as usize,
+                *ray_chunk_indices.get(2).unwrap_or(&ray_chunk_indices[0]) as usize,
+                *ray_chunk_indices.get(3).unwrap_or(&ray_chunk_indices[0]) as usize,
+            ];
+            let ray_origins = Vec3x4::from([
+                rays[ray_indices_padded[0]].origin_near.xyz(),
+                rays[ray_indices_padded[1]].origin_near.xyz(),
+                rays[ray_indices_padded[2]].origin_near.xyz(),
+                rays[ray_indices_padded[3]].origin_near.xyz(),
+            ]);
+            let ray_directions = Vec3x4::from([
+                rays[ray_indices_padded[0]].direction.xyz(),
+                rays[ray_indices_padded[1]].direction.xyz(),
+                rays[ray_indices_padded[2]].direction.xyz(),
+                rays[ray_indices_padded[3]].direction.xyz(),
+            ]);
 
-                            let hit: [f32; 4] = hit.into();
-                            for (&i, hit) in ray_indices.iter().zip(hit) {
-                                let ray = &mut rays[i as usize];
-                                if hit < ray.direction_recip_far.w {
-                                    ray.direction_recip_far.w = hit;
-                                    hit_objects[i as usize] = Some(obj);
-                                }
-                            }
-                        }
+            for tri_idx in triangles_range.clone() {
+                let tri = &self.triangles[tri_idx];
+                let hit = tri.intersect_simd(&ray_origins, &ray_directions);
+
+                let hit: [f32; 4] = hit.into();
+                for (&ray_idx, hit) in ray_chunk_indices.iter().zip(hit) {
+                    let ray = &mut rays[ray_idx as usize];
+                    if hit < ray.direction_recip_far.w {
+                        ray.direction_recip_far.w = hit;
+                        hit_objects[ray_idx as usize] = Some(self.object_indices[tri_idx]);
                     }
                 }
             }

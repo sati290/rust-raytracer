@@ -37,7 +37,7 @@ impl Camera {
         }
     }
 
-    pub fn position(&self) -> Vec3 {
+    pub fn _position(&self) -> Vec3 {
         self.eye_pos
     }
 

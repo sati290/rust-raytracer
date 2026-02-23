@@ -1,6 +1,7 @@
 mod aabb;
 mod bvh;
 mod triangle;
+mod triangle_opt;
 mod camera;
 
 use image::RgbImage;
@@ -38,7 +39,7 @@ impl Ray {
     }
 
     #[must_use]
-    fn is_hit(&self) -> bool {
+    fn _is_hit(&self) -> bool {
         self.direction_recip_far.w < f32::INFINITY
     }
 
@@ -70,7 +71,7 @@ fn brdf(dir_in: Vec3, dir_out: Vec3, normal: Vec3) -> Vec3 {
     Vec3::one() * (ndotl.clamp(0., 1.) + 0.2 * s.clamp(0., 1.))
 }
 
-fn brdf_simd(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
+fn _brdf_simd(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
     let ndotl = normal.dot(dir_in);
     Vec3x4::one() * ndotl.max(f32x4::ZERO)
 }
@@ -78,6 +79,7 @@ fn brdf_simd(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
 fn trace_batch(
     batch: &mut Batch,
     bvh: &Bvh,
+    objects: &[Triangle],
     camera: &Camera,
     light_pos: &Vec3,
 ) {
@@ -104,8 +106,9 @@ fn trace_batch(
 
     let mut shadow_rays = Vec::with_capacity(camera_rays.len());
     let mut shadow_ray_infos = Vec::with_capacity(camera_rays.len());
-    for ((ray_info, ray), hit_object) in ray_infos.into_iter().zip(camera_rays.into_iter()).zip(hit_objects.iter()) {
-        if let Some(hit) = hit_object {
+    for ((ray_info, ray), hit_object_idx) in ray_infos.into_iter().zip(camera_rays.into_iter()).zip(hit_objects.iter()) {
+        let hit_obj = hit_object_idx.map(|i| &objects[i]);
+        if let Some(hit) = hit_obj {
             let hit_pos = ray.hit_pos();
             let shadow_ray_dir = (*light_pos - hit_pos).normalized();
             let brdf = brdf(shadow_ray_dir, -ray.direction.xyz(), hit.normal);
@@ -237,7 +240,7 @@ fn main() {
     for _ in 0..warmup_frames {
         batches
             .par_iter_mut()
-            .for_each(|batch| trace_batch(batch, &bvh, &camera, &light_pos));
+            .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
     }
 
     let warmup_elapsed = warmup_start.elapsed();
@@ -249,7 +252,7 @@ fn main() {
     for _ in 0..frames {
         batches
             .par_iter_mut()
-            .for_each(|batch| trace_batch(batch, &bvh, &camera, &light_pos));
+            .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
     }
 
     let elapsed = time_start.elapsed();
@@ -264,6 +267,7 @@ fn main() {
         .iter()
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     println!("{:?}", trace_stats);
+    println!("avg {} rays {} objs per leaf visit", trace_stats.leaf_rays / trace_stats.leaf_visit, trace_stats.leaf_objs / trace_stats.leaf_visit);
 
     let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb(pixels[(y * image_width + x) as usize]));
     let now = Local::now();

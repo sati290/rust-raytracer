@@ -36,7 +36,7 @@ impl Aabb {
     }
 
     #[must_use]
-    pub fn grow(&self, point: Vec3) -> Aabb {
+    pub fn _grow(&self, point: Vec3) -> Aabb {
         Aabb {
             min: self.min.min_by_component(point),
             max: self.max.max_by_component(point),
@@ -62,7 +62,7 @@ impl Aabb {
     }
 
     #[must_use]
-    pub fn intersect(&self, ray_origin: &Vec3, ray_direction_recip: &Vec3) -> bool {
+    pub fn _intersect(&self, ray_origin: &Vec3, ray_direction_recip: &Vec3) -> bool {
         let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
         let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
 
@@ -85,7 +85,7 @@ impl Aabb {
     }
 
     #[must_use]
-    pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
+    pub fn _intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
         let origin_dir_recip = *ray_origin * *ray_direction_recip;
 
         let tx1 = f32x4::splat(self.min.x).mul_sub(ray_direction_recip.x, origin_dir_recip.x);
