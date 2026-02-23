@@ -1,58 +1,37 @@
 mod aabb;
 mod bvh;
+mod ray;
 mod triangle;
 mod triangle_opt;
 mod camera;
 
+use clap::Parser;
 use image::RgbImage;
 use obj::Obj;
 use rayon::prelude::*;
 use std::{fs};
 use std::time::Instant;
-use ultraviolet::{Vec3, Vec3x4, Vec4};
+use ultraviolet::{Vec3, Vec3x4};
 use wide::{f32x4, CmpGe};
 use chrono::{Local};
 use crate::triangle::Triangle;
 use crate::camera::{Camera, Rect};
 use crate::bvh::{Bvh, TraceStats};
-
+use crate::ray::Ray;
 
 const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
 
-#[repr(C, align(16))]
-pub struct Ray {
-    origin_near: Vec4,         // x, y, z, near
-    direction_recip_far: Vec4, // x, y, z, far
-    direction: Vec4,
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long)]
+    bench: bool,
+
+    #[arg(short, long)]
+    singlethread: bool
 }
 
-impl Ray {
-    #[must_use]
-    fn new(origin: &Vec3, direction: &Vec3) -> Self {
-        let dir_recip = Vec3::one() / *direction;
-        Ray {
-            origin_near: Vec4::new(origin.x, origin.y, origin.z, 0.),
-            direction: Vec4::from(*direction),
-            direction_recip_far: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, f32::INFINITY),
-        }
-    }
 
-    #[must_use]
-    fn _is_hit(&self) -> bool {
-        self.direction_recip_far.w < f32::INFINITY
-    }
-
-    #[must_use]
-    fn hit_dist(&self) -> f32 {
-        self.direction_recip_far.w
-    }
-
-    #[must_use]
-    fn hit_pos(&self) -> Vec3 {
-        self.origin_near.xyz() + self.direction.xyz() * self.hit_dist()
-    }
-}
 
 pub struct PathInfo {
     contribution: Vec3,
@@ -211,6 +190,8 @@ fn generate_batches(pixels: &mut [Vec3], image_width: u32, image_height: u32, ba
 }
 
 fn main() {
+    let args = Args::parse();
+
     let triangles = load_scene();
     let bvh_start = Instant::now();
     let bvh = Bvh::build(&triangles);
@@ -235,25 +216,41 @@ fn main() {
         BATCH_SIZE * BATCH_SIZE * NUM_SUBSAMPLES as u32
     );
 
-    let warmup_start = Instant::now();
+    let mut frames = 1;
+    if args.bench {
+        let warmup_start = Instant::now();
 
-    let warmup_frames = 5;
-    for _ in 0..warmup_frames {
-        batches
-            .par_iter_mut()
-            .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+        let warmup_frames = 5;
+        for _ in 0..warmup_frames {
+            if args.singlethread {
+                batches
+                    .iter_mut()
+                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));    
+            } else {
+                batches
+                    .par_iter_mut()
+                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+            }
+        }
+
+        let warmup_elapsed = warmup_start.elapsed();
+        println!("warmup {:.2?} for {} frames", warmup_elapsed, warmup_frames);
+
+        frames = (10. / (warmup_elapsed.as_secs_f32() / warmup_frames as f32)).ceil() as u32;
     }
 
-    let warmup_elapsed = warmup_start.elapsed();
-    println!("warmup {:.2?} for {} frames", warmup_elapsed, warmup_frames);
-
-    let frames = (15. / (warmup_elapsed.as_secs_f32() / warmup_frames as f32)).ceil() as u32;
     let time_start = Instant::now();
 
     for _ in 0..frames {
-        batches
-            .par_iter_mut()
-            .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+        if args.singlethread {
+            batches
+                .iter_mut()
+                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));    
+        } else {
+            batches
+                .par_iter_mut()
+                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+        }
     }
 
     let elapsed = time_start.elapsed();
