@@ -8,6 +8,8 @@ use crate::triangle::Triangle;
 use crate::triangle_opt::TriangleOpt;
 use crate::{Ray};
 
+type RayIdx = u32;
+
 #[derive(Debug)]
 struct BvhStats {
     num_leaves: u32,
@@ -181,7 +183,8 @@ impl Bvh {
         hit_objects: &mut [Option<usize>],
         stats: &mut TraceStats,
     ) {
-        assert!(rays.len() <= u16::MAX as usize);
+        
+        assert!(rays.len() <= RayIdx::MAX as usize);
         use safe_arch::*;
 
         stats.trace_start(rays.len() as u64);
@@ -197,7 +200,7 @@ impl Bvh {
         let mut ray_list_sizes = [0; 3];
         
         for (i, item) in ray_lists[0].iter_mut().enumerate().take(rays.len()) {
-            *item = i as u16;
+            *item = i as RayIdx;
         }
         ray_list_sizes[0] = rays.len();
         stack.push((&self.root_node, 0, 0));
@@ -334,9 +337,9 @@ impl Bvh {
                         let right_hit_a = (mask >> 1) & 0b1;
                         let left_first_a = left_first_mask & 0b1;
 
-                        ray_lists[0][ray_list_sizes[0]] = ray_idx_a as u16;
-                        ray_lists[1][ray_list_sizes[1]] = ray_idx_a as u16;
-                        ray_lists[2][ray_list_sizes[2]] = ray_idx_a as u16;
+                        ray_lists[0][ray_list_sizes[0]] = ray_idx_a as RayIdx;
+                        ray_lists[1][ray_list_sizes[1]] = ray_idx_a as RayIdx;
+                        ray_lists[2][ray_list_sizes[2]] = ray_idx_a as RayIdx;
                         ray_list_sizes[0] += (left_hit_a & left_first_a) as usize;
                         ray_list_sizes[1] += right_hit_a as usize;
                         ray_list_sizes[2] += (left_hit_a & (left_first_a ^ 0b1)) as usize;
@@ -346,9 +349,9 @@ impl Bvh {
                             let right_hit_b = (mask >> 3) & 0b1;
                             let left_first_b = (left_first_mask >> 2) & 0b1;
 
-                            ray_lists[0][ray_list_sizes[0]] = ray_idx_b as u16;
-                            ray_lists[1][ray_list_sizes[1]] = ray_idx_b as u16;
-                            ray_lists[2][ray_list_sizes[2]] = ray_idx_b as u16;
+                            ray_lists[0][ray_list_sizes[0]] = ray_idx_b as RayIdx;
+                            ray_lists[1][ray_list_sizes[1]] = ray_idx_b as RayIdx;
+                            ray_lists[2][ray_list_sizes[2]] = ray_idx_b as RayIdx;
                             ray_list_sizes[0] += (left_hit_b & left_first_b) as usize;
                             ray_list_sizes[1] += right_hit_b as usize;
                             ray_list_sizes[2] += (left_hit_b & (left_first_b ^ 0b1)) as usize;
@@ -378,7 +381,7 @@ impl Bvh {
         }
     }
 
-    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[u16], rays: &mut [Ray], hit_objects: &mut [Option<usize>]) {
+    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[RayIdx], rays: &mut [Ray], hit_objects: &mut [Option<usize>]) {
         for ray_chunk_indices in ray_indices.chunks(4)
         {
             let ray_indices_padded = [
