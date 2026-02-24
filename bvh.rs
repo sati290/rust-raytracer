@@ -1,56 +1,12 @@
-use std::ops::Add;
 use std::ops::Range;
 use arrayvec::ArrayVec;
 use ultraviolet::{Vec3, Vec3x4};
 
 use crate::aabb::Aabb;
+use crate::trace_stats::TraceStats;
 use crate::triangle::Triangle;
 use crate::triangle_opt::TriangleOpt;
 use crate::{Ray};
-
-#[derive(Clone, Copy, Debug)]
-pub struct TraceStats {
-    total_rays: u32,
-    inner_visit: u32,
-    leaf_visit: u32,
-    obj_intersect: u32,
-    leaf_rays: u32,
-    leaf_objs: u32,
-}
-
-impl TraceStats {
-    pub fn new() -> Self {
-        TraceStats {
-            total_rays: 0,
-            inner_visit: 0,
-            leaf_visit: 0,
-            obj_intersect: 0,
-            leaf_rays: 0,
-            leaf_objs: 0
-        }
-    }
-
-    pub fn print(&self) {
-        println!("{:?}", self);
-        println!("avg {} rays {} objs per leaf visit", self.leaf_rays / self.leaf_visit, self.leaf_objs / self.leaf_visit);
-        println!("{} intersects per ray", self.obj_intersect as f32 / self.total_rays as f32);
-    }
-}
-
-impl Add for TraceStats {
-    type Output = TraceStats;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        TraceStats {
-            total_rays: self.total_rays + rhs.total_rays,
-            inner_visit: self.inner_visit + rhs.inner_visit,
-            leaf_visit: self.leaf_visit + rhs.leaf_visit,
-            obj_intersect: self.obj_intersect + rhs.obj_intersect,
-            leaf_rays: self.leaf_rays + rhs.leaf_rays,
-            leaf_objs: self.leaf_objs + rhs.leaf_objs,
-        }
-    }
-}
 
 #[derive(Debug)]
 struct BvhStats {
@@ -228,14 +184,16 @@ impl Bvh {
         assert!(rays.len() <= u16::MAX as usize);
         use safe_arch::*;
 
-        stats.total_rays += rays.len() as u32;
+        stats.trace_start(rays.len() as u64);
 
         let mut stack = ArrayVec::<_, 64>::new();
         let ray_list_len = rays.len() * 32;
         let mut ray_list_vec = vec![0; ray_list_len * 3];
-        let (rl1, rest) = ray_list_vec.split_at_mut(ray_list_len);
-        let (rl2, rl3) = rest.split_at_mut(ray_list_len);
-        let ray_lists = [rl1, rl2, rl3];
+        let ray_lists = {
+            let (rl1, rest) = ray_list_vec.split_at_mut(ray_list_len);
+            let (rl2, rl3) = rest.split_at_mut(ray_list_len);
+            [rl1, rl2, rl3]
+        };
         let mut ray_list_sizes = [0; 3];
         
         for (i, item) in ray_lists[0].iter_mut().enumerate().take(rays.len()) {
@@ -255,7 +213,7 @@ impl Bvh {
                     child_bbox,
                     children,
                 } => {
-                    stats.inner_visit += 1;
+                    stats.inner_visit((last_active_ray_idx - active_ray_idx) as u64);
 
                     let bb_min_x = m128::from([
                         child_bbox[0].min.x,
@@ -412,14 +370,7 @@ impl Bvh {
                     }
                 }
                 BvhNode::Leaf { triangles_range } => {
-                    stats.leaf_visit += 1;
-                    stats.obj_intersect +=
-                        ((last_active_ray_idx - active_ray_idx) * triangles_range.len()) as u32;
-                    // TODO: crashes
-                    // stats.obj_intersect_skipped +=
-                    //     stats.obj_intersect - rays.len() as u32 * triangles_range.len() as u32;
-                    stats.leaf_rays += (last_active_ray_idx - active_ray_idx) as u32;
-                    stats.leaf_objs += triangles_range.len() as u32;
+                    stats.leaf_visit((last_active_ray_idx - active_ray_idx) as u64, triangles_range.len() as u64);
 
                     self.intersect_objs(triangles_range.clone(), &ray_lists[list_idx][active_ray_idx..last_active_ray_idx], rays, hit_objects);
                 }

@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/rust.exe",
-            "args": [],
+            "args": ["-s"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],

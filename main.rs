@@ -1,6 +1,7 @@
 mod aabb;
 mod bvh;
 mod ray;
+mod trace_stats;
 mod triangle;
 mod triangle_opt;
 mod camera;
@@ -14,9 +15,10 @@ use std::time::Instant;
 use ultraviolet::{Vec3, Vec3x4};
 use wide::{f32x4, CmpGe};
 use chrono::{Local};
+use crate::trace_stats::TraceStats;
 use crate::triangle::Triangle;
 use crate::camera::{Camera, Rect};
-use crate::bvh::{Bvh, TraceStats};
+use crate::bvh::Bvh;
 use crate::ray::Ray;
 
 const NUM_SUBSAMPLES: usize = 4;
