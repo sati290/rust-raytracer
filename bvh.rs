@@ -1,26 +1,26 @@
-use std::ops::{Add, AddAssign, Range};
 use arrayvec::ArrayVec;
+use std::ops::{Add, AddAssign, Range};
 use ultraviolet::{Vec3, Vec3x4};
 
+use crate::Ray;
 use crate::aabb::Aabb;
 use crate::trace_stats::TraceStats;
 use crate::triangle::Triangle;
 use crate::triangle_opt::TriangleOpt;
-use crate::{Ray};
 
 type RayIdx = u32;
 
 #[derive(Debug)]
 struct BvhStats {
     num_leaves: u32,
-    max_depth: u32
+    max_depth: u32,
 }
 
 impl BvhStats {
-    fn new () -> Self {
+    fn new() -> Self {
         BvhStats {
             num_leaves: 0,
-            max_depth: 0
+            max_depth: 0,
         }
     }
 
@@ -71,7 +71,10 @@ impl Bvh {
         let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds, 0, &mut stats);
         println!("{:?}", stats);
 
-        let triangles = object_indices.iter().map(|&idx| TriangleOpt::from(&objects[idx])).collect();
+        let triangles = object_indices
+            .iter()
+            .map(|&idx| TriangleOpt::from(&objects[idx]))
+            .collect();
 
         Bvh {
             triangles,
@@ -94,7 +97,7 @@ impl Bvh {
                 BvhNode::Leaf {
                     triangles_range: indices_start_idx..indices_start_idx + indices.len(),
                 }
-            },
+            }
             _ => {
                 let mut bounds = Aabb::empty();
                 let mut centroid_bounds = Aabb::empty();
@@ -177,8 +180,24 @@ impl Bvh {
 
                 let mut stats_r = BvhStats::new();
                 let (child_left, child_right) = rayon::join(
-                    || Bvh::build_recursive(indices_left, indices_start_idx, object_bounds, depth + 1, stats),
-                     || Bvh::build_recursive(indices_right, indices_start_idx + split_idx, object_bounds, depth + 1, &mut stats_r)
+                    || {
+                        Bvh::build_recursive(
+                            indices_left,
+                            indices_start_idx,
+                            object_bounds,
+                            depth + 1,
+                            stats,
+                        )
+                    },
+                    || {
+                        Bvh::build_recursive(
+                            indices_right,
+                            indices_start_idx + split_idx,
+                            object_bounds,
+                            depth + 1,
+                            &mut stats_r,
+                        )
+                    },
                 );
                 *stats += stats_r;
 
@@ -196,7 +215,6 @@ impl Bvh {
         hit_objects: &mut [Option<RayIdx>],
         stats: &mut TraceStats,
     ) {
-        
         assert!(rays.len() <= RayIdx::MAX as usize);
         use safe_arch::*;
 
@@ -211,7 +229,7 @@ impl Bvh {
             [rl1, rl2, rl3]
         };
         let mut ray_list_sizes = [0; 3];
-        
+
         for (i, item) in ray_lists[0].iter_mut().enumerate().take(rays.len()) {
             *item = i as RayIdx;
         }
@@ -386,17 +404,30 @@ impl Bvh {
                     }
                 }
                 BvhNode::Leaf { triangles_range } => {
-                    stats.leaf_visit((last_active_ray_idx - active_ray_idx) as u64, triangles_range.len() as u64);
+                    stats.leaf_visit(
+                        (last_active_ray_idx - active_ray_idx) as u64,
+                        triangles_range.len() as u64,
+                    );
 
-                    self.intersect_objs(triangles_range.clone(), &ray_lists[list_idx][active_ray_idx..last_active_ray_idx], rays, hit_objects);
+                    self.intersect_objs(
+                        triangles_range.clone(),
+                        &ray_lists[list_idx][active_ray_idx..last_active_ray_idx],
+                        rays,
+                        hit_objects,
+                    );
                 }
             }
         }
     }
 
-    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[RayIdx], rays: &mut [Ray], hit_objects: &mut [Option<RayIdx>]) {
-        for ray_chunk_indices in ray_indices.chunks(4)
-        {
+    fn intersect_objs(
+        &self,
+        triangles_range: Range<usize>,
+        ray_indices: &[RayIdx],
+        rays: &mut [Ray],
+        hit_objects: &mut [Option<RayIdx>],
+    ) {
+        for ray_chunk_indices in ray_indices.chunks(4) {
             let ray_indices_padded = [
                 ray_chunk_indices[0] as usize,
                 *ray_chunk_indices.get(1).unwrap_or(&ray_chunk_indices[0]) as usize,
@@ -423,9 +454,10 @@ impl Bvh {
                 let hit: [f32; 4] = hit.into();
                 for (&ray_idx, hit) in ray_chunk_indices.iter().zip(hit) {
                     let ray = &mut rays[ray_idx as usize];
-                    if (ray.origin_near.w .. ray.direction_recip_far.w).contains(&hit) {
+                    if (ray.origin_near.w..ray.direction_recip_far.w).contains(&hit) {
                         ray.direction_recip_far.w = hit;
-                        hit_objects[ray_idx as usize] = Some(self.object_indices[tri_idx] as RayIdx);
+                        hit_objects[ray_idx as usize] =
+                            Some(self.object_indices[tri_idx] as RayIdx);
                     }
                 }
             }

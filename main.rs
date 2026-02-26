@@ -1,28 +1,28 @@
 mod aabb;
 mod bvh;
+mod camera;
 mod ray;
 mod trace_stats;
 mod triangle;
 mod triangle_opt;
-mod camera;
 
-use clap::Parser;
-use image::RgbImage;
-use obj::Obj;
-use rand::{Rng, SeedableRng};
-use rand::rngs::SmallRng;
-use rayon::prelude::*;
-use core::f32;
-use std::{fs};
-use std::time::Instant;
-use ultraviolet::{Vec3, Vec3x4, Vec4};
-use wide::{f32x4, CmpGe};
-use chrono::{Local};
+use crate::bvh::Bvh;
+use crate::camera::{Camera, Rect};
+use crate::ray::Ray;
 use crate::trace_stats::TraceStats;
 use crate::triangle::Triangle;
-use crate::camera::{Camera, Rect};
-use crate::bvh::Bvh;
-use crate::ray::Ray;
+use chrono::Local;
+use clap::Parser;
+use core::f32;
+use image::RgbImage;
+use obj::Obj;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
+use std::fs;
+use std::time::Instant;
+use ultraviolet::{Vec3, Vec3x4, Vec4};
+use wide::{CmpGe, f32x4};
 
 const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
@@ -35,10 +35,8 @@ struct Args {
     bench: bool,
 
     #[arg(short, long)]
-    singlethread: bool
+    singlethread: bool,
 }
-
-
 
 pub struct PathInfo {
     contribution: Vec3,
@@ -75,7 +73,7 @@ fn trace_batch<R: Rng>(
     let max_rays = num_pixels * NUM_SUBSAMPLES;
     let mut rays = Vec::with_capacity(max_rays);
     let mut ray_infos = Vec::with_capacity(max_rays);
-    
+
     let max_shadow_rays = num_pixels * NUM_SUBSAMPLES * MAX_BOUNCES as usize;
     let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
     let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
@@ -85,17 +83,13 @@ fn trace_batch<R: Rng>(
     for p in &mut batch.pixels {
         p.w += NUM_SUBSAMPLES as f32;
     }
-    
+
     while !rays.is_empty() {
         hit_objects.clear();
         hit_objects.resize(rays.len(), None);
-        
-        bvh.trace_stream(
-            &mut rays,
-            &mut hit_objects,
-            &mut batch.trace_stats,
-        );
-    
+
+        bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
+
         let mut new_rays_len = 0;
         for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
             if let &Some(hit_obj_idx) = hit_obj_idx {
@@ -109,14 +103,21 @@ fn trace_batch<R: Rng>(
                 let shadow_ray_dir = (*light_pos - hit_pos).normalized();
                 let shadow_brdf = brdf(shadow_ray_dir, ray_dir_inv, hit_obj.normal);
                 shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
-                shadow_ray_infos.push(PathInfo { contribution: path_info.contribution * shadow_brdf, ..*path_info });
+                shadow_ray_infos.push(PathInfo {
+                    contribution: path_info.contribution * shadow_brdf,
+                    ..*path_info
+                });
 
                 // Diffuse ray
                 if path_info.bounces < MAX_BOUNCES - 1 {
                     let diffuse_ray_dir = ray_dir_inv.reflected(hit_obj.normal);
                     let diffuse_brdf = brdf(diffuse_ray_dir, ray_dir_inv, hit_obj.normal);
                     rays[new_rays_len] = Ray::new(&hit_pos, &diffuse_ray_dir, 0.);
-                    ray_infos[new_rays_len] = PathInfo { contribution: path_info.contribution * diffuse_brdf, destination_idx: path_info.destination_idx, bounces: path_info.bounces + 1 };
+                    ray_infos[new_rays_len] = PathInfo {
+                        contribution: path_info.contribution * diffuse_brdf,
+                        destination_idx: path_info.destination_idx,
+                        bounces: path_info.bounces + 1,
+                    };
                     new_rays_len += 1;
                 }
             }
@@ -188,7 +189,13 @@ impl<R: Rng> Batch<'_, R> {
     }
 }
 
-fn generate_batches<'a, R: Rng>(pixels: &'a mut [Vec4], image_width: u32, image_height: u32, batch_size: u32, rng: &mut R) -> Vec<Batch<'a, SmallRng>> {
+fn generate_batches<'a, R: Rng>(
+    pixels: &'a mut [Vec4],
+    image_width: u32,
+    image_height: u32,
+    batch_size: u32,
+    rng: &mut R,
+) -> Vec<Batch<'a, SmallRng>> {
     let num_regions_x = image_width.div_ceil(batch_size);
     let num_regions_y = image_height.div_ceil(batch_size);
 
@@ -199,7 +206,12 @@ fn generate_batches<'a, R: Rng>(pixels: &'a mut [Vec4], image_width: u32, image_
             let y = region_y * batch_size;
             let width = batch_size.min(image_width - x);
             let height = batch_size.min(image_height - y);
-            let rect = Rect { x, y, width, height };
+            let rect = Rect {
+                x,
+                y,
+                width,
+                height,
+            };
             batches.push(Batch::new(rect, SmallRng::from_rng(rng)));
         }
     }
@@ -230,11 +242,19 @@ fn main() {
     let image_width = 1920;
     let image_height = 1080;
 
-    let camera = Camera::new(cam_pos, cam_target, Vec3::new(0., 1., 0.), 60., image_width, image_height);
+    let camera = Camera::new(
+        cam_pos,
+        cam_target,
+        Vec3::new(0., 1., 0.),
+        60.,
+        image_width,
+        image_height,
+    );
 
     let mut rng = SmallRng::seed_from_u64(RNG_SEED);
     let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
-    let mut batches = generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
+    let mut batches =
+        generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
 
     const RAYS_PER_BATCH: usize = BATCH_SIZE as usize * BATCH_SIZE as usize * NUM_SUBSAMPLES;
     println!(
@@ -245,10 +265,26 @@ fn main() {
         RAYS_PER_BATCH,
     );
 
-    println!("[Vec3; {0}x{0}] = {1} kbytes", BATCH_SIZE, std::mem::size_of::<[Vec3; (BATCH_SIZE * BATCH_SIZE) as usize]>() as f32 / 1024.);
-    println!("[Ray; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[Ray; RAYS_PER_BATCH]>() as f32 / 1024.);
-    println!("[PathInfo; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[PathInfo; RAYS_PER_BATCH]>() as f32 / 1024.);
-    println!("[Option<usize>; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[Option<usize>; RAYS_PER_BATCH]>() as f32 / 1024.);
+    println!(
+        "[Vec3; {0}x{0}] = {1} kbytes",
+        BATCH_SIZE,
+        std::mem::size_of::<[Vec3; (BATCH_SIZE * BATCH_SIZE) as usize]>() as f32 / 1024.
+    );
+    println!(
+        "[Ray; {}] = {} kbytes",
+        RAYS_PER_BATCH,
+        std::mem::size_of::<[Ray; RAYS_PER_BATCH]>() as f32 / 1024.
+    );
+    println!(
+        "[PathInfo; {}] = {} kbytes",
+        RAYS_PER_BATCH,
+        std::mem::size_of::<[PathInfo; RAYS_PER_BATCH]>() as f32 / 1024.
+    );
+    println!(
+        "[Option<usize>; {}] = {} kbytes",
+        RAYS_PER_BATCH,
+        std::mem::size_of::<[Option<usize>; RAYS_PER_BATCH]>() as f32 / 1024.
+    );
 
     let mut frames = 1;
     if args.bench {
@@ -259,7 +295,7 @@ fn main() {
             if args.singlethread {
                 batches
                     .iter_mut()
-                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));    
+                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
             } else {
                 batches
                     .par_iter_mut()
@@ -279,7 +315,7 @@ fn main() {
         if args.singlethread {
             batches
                 .iter_mut()
-                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));    
+                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
         } else {
             batches
                 .par_iter_mut()
@@ -300,8 +336,12 @@ fn main() {
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     trace_stats.print();
 
-    let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb_norm(pixels[(y * image_width + x) as usize]));
+    let image = RgbImage::from_fn(image_width, image_height, |x, y| {
+        color_vec_to_rgb_norm(pixels[(y * image_width + x) as usize])
+    });
     let now = Local::now();
     let _ = fs::create_dir("output");
-    image.save(format!("output/{}.png", now.format("%Y%m%d_%H%M%S"))).unwrap();
+    image
+        .save(format!("output/{}.png", now.format("%Y%m%d_%H%M%S")))
+        .unwrap();
 }

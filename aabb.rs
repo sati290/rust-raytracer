@@ -1,7 +1,7 @@
-use crate::f32x4;
 use crate::CmpGe;
 use crate::Vec3;
 use crate::Vec3x4;
+use crate::f32x4;
 
 #[derive(Clone, Copy)]
 pub struct Aabb {

@@ -34,7 +34,11 @@ impl Triangle {
     }
 
     #[must_use]
-    pub fn _intersect<const B: bool>(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> Option<f32> {
+    pub fn _intersect<const B: bool>(
+        &self,
+        ray_origin: &Vec3,
+        ray_direction: &Vec3,
+    ) -> Option<f32> {
         let v0v1 = self.verts[1] - self.verts[0];
         let v0v2 = self.verts[2] - self.verts[0];
         let pvec = ray_direction.cross(v0v1);
@@ -65,7 +69,11 @@ impl Triangle {
     }
 
     #[must_use]
-    pub fn _intersect_simd<const B: bool>(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
+    pub fn _intersect_simd<const B: bool>(
+        &self,
+        ray_origin: &Vec3x4,
+        ray_direction: &Vec3x4,
+    ) -> f32x4 {
         let v0v1 = Vec3x4::splat(self.verts[1] - self.verts[0]);
         let v0v2 = Vec3x4::splat(self.verts[2] - self.verts[0]);
         let pvec = ray_direction.cross(v0v1);
@@ -118,11 +126,36 @@ impl Triangle {
 
     #[must_use]
     pub fn _intersect_simd2x2(tris: [&Triangle; 2], rays: [&Ray; 2]) -> f32x4 {
-        let v0 = Vec3x4::from([tris[0].verts[0], tris[0].verts[0], tris[1].verts[0], tris[1].verts[0]]);
-        let v1 = Vec3x4::from([tris[0].verts[1], tris[0].verts[1], tris[1].verts[1], tris[1].verts[1]]);
-        let v2 = Vec3x4::from([tris[0].verts[2], tris[0].verts[2], tris[1].verts[2], tris[1].verts[2]]);
-        let origin = Vec3x4::from([rays[0].origin_near.xyz(), rays[1].origin_near.xyz(), rays[0].origin_near.xyz(), rays[1].origin_near.xyz()]);
-        let direction = Vec3x4::from([rays[0].direction.xyz(), rays[1].direction.xyz(), rays[0].direction.xyz(), rays[1].direction.xyz()]);
+        let v0 = Vec3x4::from([
+            tris[0].verts[0],
+            tris[0].verts[0],
+            tris[1].verts[0],
+            tris[1].verts[0],
+        ]);
+        let v1 = Vec3x4::from([
+            tris[0].verts[1],
+            tris[0].verts[1],
+            tris[1].verts[1],
+            tris[1].verts[1],
+        ]);
+        let v2 = Vec3x4::from([
+            tris[0].verts[2],
+            tris[0].verts[2],
+            tris[1].verts[2],
+            tris[1].verts[2],
+        ]);
+        let origin = Vec3x4::from([
+            rays[0].origin_near.xyz(),
+            rays[1].origin_near.xyz(),
+            rays[0].origin_near.xyz(),
+            rays[1].origin_near.xyz(),
+        ]);
+        let direction = Vec3x4::from([
+            rays[0].direction.xyz(),
+            rays[1].direction.xyz(),
+            rays[0].direction.xyz(),
+            rays[1].direction.xyz(),
+        ]);
 
         let v0v1 = v1 - v0;
         let v0v2 = v2 - v0;

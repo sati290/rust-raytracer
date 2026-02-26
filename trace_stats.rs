@@ -42,9 +42,19 @@ impl TraceStats {
 
     pub fn print(&self) {
         println!("{:?}", self);
-        println!("avg {:.1} rays per inner visit", self.inner_rays as f32 / self.inner_visit as f32);
-        println!("avg {:.1} rays {:.1} objs per leaf visit", self.leaf_rays as f32 / self.leaf_visit as f32, self.leaf_objs as f32 / self.leaf_visit as f32);
-        println!("avg {:.1} intersects per ray", self.obj_intersect as f32 / self.total_rays as f32);
+        println!(
+            "avg {:.1} rays per inner visit",
+            self.inner_rays as f32 / self.inner_visit as f32
+        );
+        println!(
+            "avg {:.1} rays {:.1} objs per leaf visit",
+            self.leaf_rays as f32 / self.leaf_visit as f32,
+            self.leaf_objs as f32 / self.leaf_visit as f32
+        );
+        println!(
+            "avg {:.1} intersects per ray",
+            self.obj_intersect as f32 / self.total_rays as f32
+        );
     }
 }
 
