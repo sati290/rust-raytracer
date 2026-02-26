@@ -193,7 +193,7 @@ impl Bvh {
     pub fn trace_stream(
         &self,
         rays: &mut [Ray],
-        hit_objects: &mut [Option<usize>],
+        hit_objects: &mut [Option<RayIdx>],
         stats: &mut TraceStats,
     ) {
         
@@ -394,7 +394,7 @@ impl Bvh {
         }
     }
 
-    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[RayIdx], rays: &mut [Ray], hit_objects: &mut [Option<usize>]) {
+    fn intersect_objs(&self, triangles_range: Range<usize>, ray_indices: &[RayIdx], rays: &mut [Ray], hit_objects: &mut [Option<RayIdx>]) {
         for ray_chunk_indices in ray_indices.chunks(4)
         {
             let ray_indices_padded = [
@@ -425,7 +425,7 @@ impl Bvh {
                     let ray = &mut rays[ray_idx as usize];
                     if hit < ray.direction_recip_far.w {
                         ray.direction_recip_far.w = hit;
-                        hit_objects[ray_idx as usize] = Some(self.object_indices[tri_idx]);
+                        hit_objects[ray_idx as usize] = Some(self.object_indices[tri_idx] as RayIdx);
                     }
                 }
             }

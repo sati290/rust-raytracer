@@ -75,7 +75,7 @@ impl Camera {
                 let subpixel_rays: [Vec3; 4] = subpixel_rays.into();
                 for ray in &subpixel_rays {
                     rays.push(Ray::new(&self.eye_pos, ray));
-                    path_infos.push(PathInfo { contribution: Vec3::one(), destination_idx: (ry * region.width + rx) as usize })
+                    path_infos.push(PathInfo { contribution: Vec3::one(), destination_idx: ry * region.width + rx })
                 }
                 current_ray += next_pixel_x;
             }

@@ -40,7 +40,7 @@ struct Args {
 
 pub struct PathInfo {
     contribution: Vec3,
-    destination_idx: usize,
+    destination_idx: u32,
 }
 
 fn color_vec_to_rgb_norm(v: Vec4) -> image::Rgb<u8> {
@@ -90,7 +90,7 @@ fn trace_batch(
         if let &Some(hit_obj_idx) = hit_obj_idx {
             let ray = &rays[i];
             let path_info = &ray_infos[i];
-            let hit_obj = &objects[hit_obj_idx];
+            let hit_obj = &objects[hit_obj_idx as usize];
             let hit_pos = ray.hit_pos();
             let shadow_ray_dir = (*light_pos - hit_pos).normalized();
             let brdf = brdf(shadow_ray_dir, -ray.direction.xyz(), hit_obj.normal);
@@ -109,7 +109,7 @@ fn trace_batch(
 
     for (ray_info, ray) in ray_infos.iter().zip(rays.iter()) {
         if ray.hit_dist() == f32::INFINITY {
-            *batch.pixels[ray_info.destination_idx] += Vec4::from(ray_info.contribution) + Vec4::unit_w();
+            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(ray_info.contribution) + Vec4::unit_w();
         }
     }
 }
