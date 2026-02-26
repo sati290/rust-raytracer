@@ -1,4 +1,6 @@
-use ultraviolet::{Vec2, Vec3, Vec3x4};
+use rand::{Rng, RngExt};
+use ultraviolet::{Vec3, Vec3x4};
+use wide::f32x4;
 
 use crate::Ray;
 
@@ -41,15 +43,10 @@ impl Camera {
         self.eye_pos
     }
 
-    pub fn generate_rays(&self, region: &Rect) -> Vec<Ray> {
-        const SUBPIXELS: [Vec2; 4] = [
-            Vec2::new(1. / 8., -3. / 8.),
-            Vec2::new(-3. / 8., -1. / 8.),
-            Vec2::new(3. / 8., 1. / 8.),
-            Vec2::new(-1. / 8., 3. / 8.),
-        ];
-
-        let mut rays = Vec::with_capacity(region.width as usize * region.height as usize * SUBPIXELS.len());
+    // Generate 4 subpixel rays for each pixel
+    pub fn generate_rays_4sp<R: Rng>(&self, region: &Rect, rng: &mut R, rays: &mut Vec<Ray>) {
+        rays.clear();
+        rays.reserve(region.width as usize * region.height as usize * 4);
 
         let vp_half_width = (self.horiz_fog_deg.to_radians() / 2.).tan();
         let vp_half_height = vp_half_width * ((self.viewport_height as f32 - 1.) / (self.viewport_width as f32 - 1.));
@@ -58,21 +55,27 @@ impl Camera {
         let next_pixel_y = (2. * vp_half_height / (self.viewport_height as f32 - 1.)) * -self.cam_up;
 
         let pixel_size = vp_half_width * 2. / (self.viewport_width as f32 - 1.);
-        let subpixel_offsets = Vec3x4::from(SUBPIXELS.map(|sp| pixel_size * (sp.x * self.cam_right + sp.y * self.cam_up)));
+
+        let pixel_size_x4 = f32x4::splat(pixel_size);
+        let cam_right_x4 = Vec3x4::splat(self.cam_right);
+        let cam_up_x4 = Vec3x4::splat(self.cam_up);
 
         let ray_top_left = self.cam_forward - vp_half_width * self.cam_right + vp_half_height * self.cam_up;
-        for y in region.y..region.y + region.height {
-            let mut current_ray = ray_top_left + region.x as f32 * next_pixel_x + y as f32 * next_pixel_y;
-            for _ in region.x..region.x + region.width {
-                let subpixel_rays = (Vec3x4::splat(current_ray) + subpixel_offsets).normalized();
+        let mut ray_row_start = ray_top_left + region.x as f32 * next_pixel_x + region.y as f32 * next_pixel_y;
+        for _ in 0..region.height {
+            let mut current_ray = ray_row_start;
+            for _ in 0..region.width {
+                let sp_x = f32x4::from(rng.random::<[f32;4]>());
+                let sp_y = f32x4::from(rng.random::<[f32;4]>());
+                let sp_offsets = pixel_size_x4 * ((sp_x - f32x4::HALF) * cam_right_x4 + (sp_y - f32x4::HALF) * cam_up_x4);
+                let subpixel_rays = (Vec3x4::splat(current_ray) + sp_offsets).normalized();
                 let subpixel_rays: [Vec3; 4] = subpixel_rays.into();
-                subpixel_rays.iter().for_each(|ray| {
+                for ray in &subpixel_rays {
                     rays.push(Ray::new(&self.eye_pos, ray));
-                });
+                }
                 current_ray += next_pixel_x;
             }
+            ray_row_start += next_pixel_y;
         }
-
-        rays
     }
 }

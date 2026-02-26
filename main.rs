@@ -9,6 +9,8 @@ mod camera;
 use clap::Parser;
 use image::RgbImage;
 use obj::Obj;
+use rand::SeedableRng;
+use rand::rngs::SmallRng;
 use rayon::prelude::*;
 use std::{fs};
 use std::time::Instant;
@@ -23,6 +25,7 @@ use crate::ray::Ray;
 
 const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
+const RNG_SEED: u64 = 1235468;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -64,12 +67,20 @@ fn trace_batch(
     camera: &Camera,
     light_pos: &Vec3,
 ) {
+    let mut rng = SmallRng::seed_from_u64(RNG_SEED);
+    
     for p in batch.pixels.iter_mut() {
         **p = Vec3::zero();
     }
 
-    let mut rays = camera.generate_rays(&batch.region);
-    let mut ray_infos = Vec::with_capacity(batch.pixels.len() * NUM_SUBSAMPLES);
+    let mut rays = Vec::new();
+    let mut ray_infos = Vec::new();
+    let mut hit_objects = Vec::new();
+    
+    camera.generate_rays_4sp(&batch.region, &mut rng, &mut rays);
+    
+    ray_infos.clear();
+    ray_infos.reserve(rays.len());
     for i in 0..rays.len() {
         ray_infos.push(PathInfo {
             contribution: Vec3::one() / NUM_SUBSAMPLES as f32,
@@ -77,7 +88,9 @@ fn trace_batch(
         });
     }
 
-    let mut hit_objects = vec![None; rays.len()];
+    hit_objects.clear();
+    hit_objects.resize(rays.len(), None);
+    
     bvh.trace_stream(
         &mut rays,
         &mut hit_objects,
@@ -106,7 +119,7 @@ fn trace_batch(
     hit_objects.resize(rays.len(), None);
     bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
 
-    for (ray_info, ray) in ray_infos.into_iter().zip(rays.into_iter()) {
+    for (ray_info, ray) in ray_infos.iter().zip(rays.iter()) {
         if ray.hit_dist() == f32::INFINITY {
             *batch.pixels[ray_info.destination_idx] += ray_info.contribution;
         }
@@ -210,13 +223,19 @@ fn main() {
     let mut pixels = vec![Vec3::zero(); (image_width * image_height) as usize];
     let mut batches = generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE);
 
+    const RAYS_PER_BATCH: usize = BATCH_SIZE as usize * BATCH_SIZE as usize * NUM_SUBSAMPLES;
     println!(
         "{} {}x{} batches, {} rays/batch",
         batches.len(),
         BATCH_SIZE,
         BATCH_SIZE,
-        BATCH_SIZE * BATCH_SIZE * NUM_SUBSAMPLES as u32
+        RAYS_PER_BATCH,
     );
+
+    println!("[Vec3; {0}x{0}] = {1} kbytes", BATCH_SIZE, std::mem::size_of::<[Vec3; (BATCH_SIZE * BATCH_SIZE) as usize]>() as f32 / 1024.);
+    println!("[Ray; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[Ray; RAYS_PER_BATCH]>() as f32 / 1024.);
+    println!("[PathInfo; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[PathInfo; RAYS_PER_BATCH]>() as f32 / 1024.);
+    println!("[Option<usize>; {}] = {} kbytes", RAYS_PER_BATCH, std::mem::size_of::<[Option<usize>; RAYS_PER_BATCH]>() as f32 / 1024.);
 
     let mut frames = 1;
     if args.bench {
