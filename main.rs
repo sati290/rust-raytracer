@@ -69,10 +69,6 @@ fn trace_batch(
     light_pos: &Vec3,
 ) {
     let mut rng = SmallRng::seed_from_u64(RNG_SEED);
-    
-    for p in batch.pixels.iter_mut() {
-        **p = Vec4::zero();
-    }
 
     let mut rays = Vec::new();
     let mut ray_infos = Vec::new();
