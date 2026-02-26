@@ -2,7 +2,7 @@ use rand::{Rng, RngExt};
 use ultraviolet::{Vec3, Vec3x4};
 use wide::f32x4;
 
-use crate::Ray;
+use crate::{PathInfo, Ray};
 
 pub struct Rect {
     pub x: u32,
@@ -44,9 +44,12 @@ impl Camera {
     }
 
     // Generate 4 subpixel rays for each pixel
-    pub fn generate_rays_4sp<R: Rng>(&self, region: &Rect, rng: &mut R, rays: &mut Vec<Ray>) {
+    pub fn generate_rays_4sp<R: Rng>(&self, region: &Rect, rng: &mut R, rays: &mut Vec<Ray>, path_infos: &mut Vec<PathInfo>) {
+        let num_rays = (region.width * region.height * 4) as usize;
         rays.clear();
-        rays.reserve(region.width as usize * region.height as usize * 4);
+        rays.reserve(num_rays);
+        path_infos.clear();
+        path_infos.reserve(num_rays);
 
         let vp_half_width = (self.horiz_fog_deg.to_radians() / 2.).tan();
         let vp_half_height = vp_half_width * ((self.viewport_height as f32 - 1.) / (self.viewport_width as f32 - 1.));
@@ -62,9 +65,9 @@ impl Camera {
 
         let ray_top_left = self.cam_forward - vp_half_width * self.cam_right + vp_half_height * self.cam_up;
         let mut ray_row_start = ray_top_left + region.x as f32 * next_pixel_x + region.y as f32 * next_pixel_y;
-        for _ in 0..region.height {
+        for ry in 0..region.height {
             let mut current_ray = ray_row_start;
-            for _ in 0..region.width {
+            for rx in 0..region.width {
                 let sp_x = f32x4::from(rng.random::<[f32;4]>());
                 let sp_y = f32x4::from(rng.random::<[f32;4]>());
                 let sp_offsets = pixel_size_x4 * ((sp_x - f32x4::HALF) * cam_right_x4 + (sp_y - f32x4::HALF) * cam_up_x4);
@@ -72,6 +75,7 @@ impl Camera {
                 let subpixel_rays: [Vec3; 4] = subpixel_rays.into();
                 for ray in &subpixel_rays {
                     rays.push(Ray::new(&self.eye_pos, ray));
+                    path_infos.push(PathInfo { contribution: Vec3::one(), destination_idx: (ry * region.width + rx) as usize })
                 }
                 current_ray += next_pixel_x;
             }

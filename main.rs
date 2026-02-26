@@ -74,17 +74,8 @@ fn trace_batch(
     let mut ray_infos = Vec::new();
     let mut hit_objects = Vec::new();
     
-    camera.generate_rays_4sp(&batch.region, &mut rng, &mut rays);
+    camera.generate_rays_4sp(&batch.region, &mut rng, &mut rays, &mut ray_infos);
     
-    ray_infos.clear();
-    ray_infos.reserve(rays.len());
-    for i in 0..rays.len() {
-        ray_infos.push(PathInfo {
-            contribution: Vec3::one(),
-            destination_idx: i / NUM_SUBSAMPLES,
-        });
-    }
-
     hit_objects.clear();
     hit_objects.resize(rays.len(), None);
     
