@@ -42,7 +42,7 @@ impl Add for BvhStats {
 impl AddAssign for BvhStats {
     fn add_assign(&mut self, rhs: Self) {
         self.num_leaves += rhs.num_leaves;
-        self.max_depth += rhs.max_depth;
+        self.max_depth = self.max_depth.max(rhs.max_depth);
     }
 }
 
