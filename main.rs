@@ -9,9 +9,10 @@ mod camera;
 use clap::Parser;
 use image::RgbImage;
 use obj::Obj;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand::rngs::SmallRng;
 use rayon::prelude::*;
+use core::f32;
 use std::{fs};
 use std::time::Instant;
 use ultraviolet::{Vec3, Vec3x4, Vec4};
@@ -26,6 +27,7 @@ use crate::ray::Ray;
 const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
 const RNG_SEED: u64 = 1235468;
+const MAX_BOUNCES: u8 = 1;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -41,6 +43,7 @@ struct Args {
 pub struct PathInfo {
     contribution: Vec3,
     destination_idx: u32,
+    bounces: u8,
 }
 
 fn color_vec_to_rgb_norm(v: Vec4) -> image::Rgb<u8> {
@@ -61,55 +64,74 @@ fn _brdf_simd(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
     Vec3x4::one() * ndotl.max(f32x4::ZERO)
 }
 
-fn trace_batch(
-    batch: &mut Batch,
+fn trace_batch<R: Rng>(
+    batch: &mut Batch<R>,
     bvh: &Bvh,
     objects: &[Triangle],
     camera: &Camera,
     light_pos: &Vec3,
 ) {
-    let mut rng = SmallRng::seed_from_u64(RNG_SEED);
+    let num_pixels = (batch.region.width * batch.region.height) as usize;
+    let max_rays = num_pixels * NUM_SUBSAMPLES;
+    let mut rays = Vec::with_capacity(max_rays);
+    let mut ray_infos = Vec::with_capacity(max_rays);
+    
+    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES * MAX_BOUNCES as usize;
+    let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
+    let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
+    let mut hit_objects = Vec::with_capacity(max_rays.max(max_shadow_rays));
 
-    let mut rays = Vec::new();
-    let mut ray_infos = Vec::new();
-    let mut hit_objects = Vec::new();
+    camera.generate_rays_4sp(&batch.region, &mut batch.rng, &mut rays, &mut ray_infos);
+    for p in &mut batch.pixels {
+        p.w += NUM_SUBSAMPLES as f32;
+    }
     
-    camera.generate_rays_4sp(&batch.region, &mut rng, &mut rays, &mut ray_infos);
+    while !rays.is_empty() {
+        hit_objects.clear();
+        hit_objects.resize(rays.len(), None);
+        
+        bvh.trace_stream(
+            &mut rays,
+            &mut hit_objects,
+            &mut batch.trace_stats,
+        );
     
-    hit_objects.clear();
-    hit_objects.resize(rays.len(), None);
-    
-    bvh.trace_stream(
-        &mut rays,
-        &mut hit_objects,
-        &mut batch.trace_stats,
-    );
+        let mut new_rays_len = 0;
+        for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
+            if let &Some(hit_obj_idx) = hit_obj_idx {
+                let ray = &rays[i];
+                let path_info = &ray_infos[i];
+                let hit_obj = &objects[hit_obj_idx as usize];
+                let hit_pos = ray.hit_pos();
+                let ray_dir_inv = -ray.direction.xyz();
 
-    let mut new_rays_len = 0;
-    for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
-        if let &Some(hit_obj_idx) = hit_obj_idx {
-            let ray = &rays[i];
-            let path_info = &ray_infos[i];
-            let hit_obj = &objects[hit_obj_idx as usize];
-            let hit_pos = ray.hit_pos();
-            let shadow_ray_dir = (*light_pos - hit_pos).normalized();
-            let brdf = brdf(shadow_ray_dir, -ray.direction.xyz(), hit_obj.normal);
-            rays[new_rays_len] = Ray::new(&hit_pos, &shadow_ray_dir);
-            ray_infos[new_rays_len] = PathInfo { contribution: path_info.contribution * brdf, ..*path_info };
-            new_rays_len += 1;
+                // Shadow ray
+                let shadow_ray_dir = (*light_pos - hit_pos).normalized();
+                let shadow_brdf = brdf(shadow_ray_dir, ray_dir_inv, hit_obj.normal);
+                shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
+                shadow_ray_infos.push(PathInfo { contribution: path_info.contribution * shadow_brdf, ..*path_info });
+
+                // Diffuse ray
+                if path_info.bounces < MAX_BOUNCES - 1 {
+                    let diffuse_ray_dir = ray_dir_inv.reflected(hit_obj.normal);
+                    let diffuse_brdf = brdf(diffuse_ray_dir, ray_dir_inv, hit_obj.normal);
+                    rays[new_rays_len] = Ray::new(&hit_pos, &diffuse_ray_dir, 0.);
+                    ray_infos[new_rays_len] = PathInfo { contribution: path_info.contribution * diffuse_brdf, destination_idx: path_info.destination_idx, bounces: path_info.bounces + 1 };
+                    new_rays_len += 1;
+                }
+            }
         }
+        rays.truncate(new_rays_len);
+        ray_infos.truncate(new_rays_len);
     }
 
-    rays.truncate(new_rays_len);
-    ray_infos.truncate(new_rays_len);
-
     hit_objects.clear();
-    hit_objects.resize(rays.len(), None);
-    bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
+    hit_objects.resize(shadow_rays.len(), None);
+    bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
 
-    for (ray_info, ray) in ray_infos.iter().zip(rays.iter()) {
+    for (ray_info, ray) in shadow_ray_infos.into_iter().zip(shadow_rays.into_iter()) {
         if ray.hit_dist() == f32::INFINITY {
-            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(ray_info.contribution) + Vec4::unit_w();
+            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(ray_info.contribution);
         }
     }
 }
@@ -148,23 +170,25 @@ fn load_scene() -> Vec<Triangle> {
     triangles
 }
 
-struct Batch<'a> {
+struct Batch<'a, R: Rng> {
     region: Rect,
     pixels: Vec<&'a mut Vec4>,
+    rng: R,
     trace_stats: TraceStats,
 }
 
-impl Batch<'_> {
-    fn new(region: Rect) -> Self {
+impl<R: Rng> Batch<'_, R> {
+    fn new(region: Rect, rng: R) -> Self {
         Batch {
             region,
             pixels: Vec::new(),
+            rng,
             trace_stats: TraceStats::new(),
         }
     }
 }
 
-fn generate_batches(pixels: &mut [Vec4], image_width: u32, image_height: u32, batch_size: u32) -> Vec<Batch<'_>> {
+fn generate_batches<'a, R: Rng>(pixels: &'a mut [Vec4], image_width: u32, image_height: u32, batch_size: u32, rng: &mut R) -> Vec<Batch<'a, SmallRng>> {
     let num_regions_x = image_width.div_ceil(batch_size);
     let num_regions_y = image_height.div_ceil(batch_size);
 
@@ -176,7 +200,7 @@ fn generate_batches(pixels: &mut [Vec4], image_width: u32, image_height: u32, ba
             let width = batch_size.min(image_width - x);
             let height = batch_size.min(image_height - y);
             let rect = Rect { x, y, width, height };
-            batches.push(Batch::new(rect));
+            batches.push(Batch::new(rect, SmallRng::from_rng(rng)));
         }
     }
 
@@ -208,8 +232,9 @@ fn main() {
 
     let camera = Camera::new(cam_pos, cam_target, Vec3::new(0., 1., 0.), 60., image_width, image_height);
 
+    let mut rng = SmallRng::seed_from_u64(RNG_SEED);
     let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
-    let mut batches = generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE);
+    let mut batches = generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
 
     const RAYS_PER_BATCH: usize = BATCH_SIZE as usize * BATCH_SIZE as usize * NUM_SUBSAMPLES;
     println!(

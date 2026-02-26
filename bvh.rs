@@ -423,7 +423,7 @@ impl Bvh {
                 let hit: [f32; 4] = hit.into();
                 for (&ray_idx, hit) in ray_chunk_indices.iter().zip(hit) {
                     let ray = &mut rays[ray_idx as usize];
-                    if hit < ray.direction_recip_far.w {
+                    if (ray.origin_near.w .. ray.direction_recip_far.w).contains(&hit) {
                         ray.direction_recip_far.w = hit;
                         hit_objects[ray_idx as usize] = Some(self.object_indices[tri_idx] as RayIdx);
                     }

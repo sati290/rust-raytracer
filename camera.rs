@@ -74,8 +74,8 @@ impl Camera {
                 let subpixel_rays = (Vec3x4::splat(current_ray) + sp_offsets).normalized();
                 let subpixel_rays: [Vec3; 4] = subpixel_rays.into();
                 for ray in &subpixel_rays {
-                    rays.push(Ray::new(&self.eye_pos, ray));
-                    path_infos.push(PathInfo { contribution: Vec3::one(), destination_idx: ry * region.width + rx })
+                    rays.push(Ray::new(&self.eye_pos, ray, 0.));
+                    path_infos.push(PathInfo { contribution: Vec3::one(), destination_idx: ry * region.width + rx, bounces: 0 })
                 }
                 current_ray += next_pixel_x;
             }
