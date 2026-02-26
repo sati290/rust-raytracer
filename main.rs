@@ -14,7 +14,7 @@ use rand::rngs::SmallRng;
 use rayon::prelude::*;
 use std::{fs};
 use std::time::Instant;
-use ultraviolet::{Vec3, Vec3x4};
+use ultraviolet::{Vec3, Vec3x4, Vec4};
 use wide::{f32x4, CmpGe};
 use chrono::{Local};
 use crate::trace_stats::TraceStats;
@@ -43,8 +43,9 @@ pub struct PathInfo {
     destination_idx: usize,
 }
 
-fn color_vec_to_rgb(v: Vec3) -> image::Rgb<u8> {
-    image::Rgb([(v.x * 255.) as u8, (v.y * 255.) as u8, (v.z * 255.) as u8])
+fn color_vec_to_rgb_norm(v: Vec4) -> image::Rgb<u8> {
+    let v = v.xyz() / v.w * 255.;
+    image::Rgb([v.x as u8, v.y as u8, v.z as u8])
 }
 
 fn brdf(dir_in: Vec3, dir_out: Vec3, normal: Vec3) -> Vec3 {
@@ -70,7 +71,7 @@ fn trace_batch(
     let mut rng = SmallRng::seed_from_u64(RNG_SEED);
     
     for p in batch.pixels.iter_mut() {
-        **p = Vec3::zero();
+        **p = Vec4::zero();
     }
 
     let mut rays = Vec::new();
@@ -83,7 +84,7 @@ fn trace_batch(
     ray_infos.reserve(rays.len());
     for i in 0..rays.len() {
         ray_infos.push(PathInfo {
-            contribution: Vec3::one() / NUM_SUBSAMPLES as f32,
+            contribution: Vec3::one(),
             destination_idx: i / NUM_SUBSAMPLES,
         });
     }
@@ -121,7 +122,7 @@ fn trace_batch(
 
     for (ray_info, ray) in ray_infos.iter().zip(rays.iter()) {
         if ray.hit_dist() == f32::INFINITY {
-            *batch.pixels[ray_info.destination_idx] += ray_info.contribution;
+            *batch.pixels[ray_info.destination_idx] += Vec4::from(ray_info.contribution) + Vec4::unit_w();
         }
     }
 }
@@ -162,7 +163,7 @@ fn load_scene() -> Vec<Triangle> {
 
 struct Batch<'a> {
     region: Rect,
-    pixels: Vec<&'a mut Vec3>,
+    pixels: Vec<&'a mut Vec4>,
     trace_stats: TraceStats,
 }
 
@@ -176,7 +177,7 @@ impl Batch<'_> {
     }
 }
 
-fn generate_batches(pixels: &mut [Vec3], image_width: u32, image_height: u32, batch_size: u32) -> Vec<Batch<'_>> {
+fn generate_batches(pixels: &mut [Vec4], image_width: u32, image_height: u32, batch_size: u32) -> Vec<Batch<'_>> {
     let num_regions_x = image_width.div_ceil(batch_size);
     let num_regions_y = image_height.div_ceil(batch_size);
 
@@ -220,7 +221,7 @@ fn main() {
 
     let camera = Camera::new(cam_pos, cam_target, Vec3::new(0., 1., 0.), 60., image_width, image_height);
 
-    let mut pixels = vec![Vec3::zero(); (image_width * image_height) as usize];
+    let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
     let mut batches = generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE);
 
     const RAYS_PER_BATCH: usize = BATCH_SIZE as usize * BATCH_SIZE as usize * NUM_SUBSAMPLES;
@@ -287,7 +288,7 @@ fn main() {
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     trace_stats.print();
 
-    let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb(pixels[(y * image_width + x) as usize]));
+    let image = RgbImage::from_fn(image_width, image_height, |x, y| color_vec_to_rgb_norm(pixels[(y * image_width + x) as usize]));
     let now = Local::now();
     let _ = fs::create_dir("output");
     image.save(format!("output/{}.png", now.format("%Y%m%d_%H%M%S"))).unwrap();

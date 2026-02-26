@@ -8,12 +8,12 @@
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/target/debug/rust.exe",
+            "program": "${workspaceRoot}/target/dev-opt/rust.exe",
             "args": ["-s"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
-            "console": "externalTerminal",
+            "console": "integratedTerminal",
             "preLaunchTask": "${defaultBuildTask}"
         }
     ]

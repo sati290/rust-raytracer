@@ -4,6 +4,7 @@
 		{
 			"type": "cargo",
 			"command": "build",
+			"args": ["--profile", "dev-opt"],
 			"problemMatcher": [
 				"$rustc"
 			],
