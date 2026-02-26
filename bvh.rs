@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Add, AddAssign, Range};
 use arrayvec::ArrayVec;
 use ultraviolet::{Vec3, Vec3x4};
 
@@ -27,6 +27,22 @@ impl BvhStats {
     fn add_leaf(&mut self, depth: u32) {
         self.num_leaves += 1;
         self.max_depth = self.max_depth.max(depth);
+    }
+}
+
+impl Add for BvhStats {
+    type Output = BvhStats;
+
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+impl AddAssign for BvhStats {
+    fn add_assign(&mut self, rhs: Self) {
+        self.num_leaves += rhs.num_leaves;
+        self.max_depth += rhs.max_depth;
     }
 }
 
@@ -159,15 +175,12 @@ impl Bvh {
                 let split_idx = left;
                 let (indices_left, indices_right) = indices.split_at_mut(split_idx);
 
-                let child_left =
-                    Bvh::build_recursive(indices_left, indices_start_idx, object_bounds, depth + 1, stats);
-                let child_right = Bvh::build_recursive(
-                    indices_right,
-                    indices_start_idx + split_idx,
-                    object_bounds,
-                    depth + 1,
-                    stats
+                let mut stats_r = BvhStats::new();
+                let (child_left, child_right) = rayon::join(
+                    || Bvh::build_recursive(indices_left, indices_start_idx, object_bounds, depth + 1, stats),
+                     || Bvh::build_recursive(indices_right, indices_start_idx + split_idx, object_bounds, depth + 1, &mut stats_r)
                 );
+                *stats += stats_r;
 
                 BvhNode::Inner {
                     child_bbox: [bounds_l, bounds_r],
