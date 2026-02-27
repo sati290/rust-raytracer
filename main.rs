@@ -27,7 +27,6 @@ use wide::{CmpGe, f32x4};
 const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
 const RNG_SEED: u64 = 1235468;
-const MAX_BOUNCES: u8 = 1;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -36,6 +35,9 @@ struct Args {
 
     #[arg(short, long)]
     singlethread: bool,
+
+    #[arg(short, long, default_value_t = 1)]
+    max_bounces: u8,
 }
 
 pub struct PathInfo {
@@ -68,13 +70,14 @@ fn trace_batch<R: Rng>(
     objects: &[Triangle],
     camera: &Camera,
     light_pos: &Vec3,
+    max_bounces: u8,
 ) {
     let num_pixels = (batch.region.width * batch.region.height) as usize;
     let max_rays = num_pixels * NUM_SUBSAMPLES;
     let mut rays = Vec::with_capacity(max_rays);
     let mut ray_infos = Vec::with_capacity(max_rays);
 
-    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES * MAX_BOUNCES as usize;
+    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES * max_bounces as usize;
     let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
     let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
     let mut hit_objects = Vec::with_capacity(max_rays.max(max_shadow_rays));
@@ -109,7 +112,7 @@ fn trace_batch<R: Rng>(
                 });
 
                 // Diffuse ray
-                if path_info.bounces < MAX_BOUNCES - 1 {
+                if path_info.bounces < max_bounces - 1 {
                     let diffuse_ray_dir = ray_dir_inv.reflected(hit_obj.normal);
                     let diffuse_brdf = brdf(diffuse_ray_dir, ray_dir_inv, hit_obj.normal);
                     rays[new_rays_len] = Ray::new(&hit_pos, &diffuse_ray_dir, 0.);
@@ -293,13 +296,27 @@ fn main() {
         let warmup_frames = 5;
         for _ in 0..warmup_frames {
             if args.singlethread {
-                batches
-                    .iter_mut()
-                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+                batches.iter_mut().for_each(|batch| {
+                    trace_batch(
+                        batch,
+                        &bvh,
+                        &triangles,
+                        &camera,
+                        &light_pos,
+                        args.max_bounces,
+                    )
+                });
             } else {
-                batches
-                    .par_iter_mut()
-                    .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+                batches.par_iter_mut().for_each(|batch| {
+                    trace_batch(
+                        batch,
+                        &bvh,
+                        &triangles,
+                        &camera,
+                        &light_pos,
+                        args.max_bounces,
+                    )
+                });
             }
         }
 
@@ -313,13 +330,27 @@ fn main() {
 
     for _ in 0..frames {
         if args.singlethread {
-            batches
-                .iter_mut()
-                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+            batches.iter_mut().for_each(|batch| {
+                trace_batch(
+                    batch,
+                    &bvh,
+                    &triangles,
+                    &camera,
+                    &light_pos,
+                    args.max_bounces,
+                )
+            });
         } else {
-            batches
-                .par_iter_mut()
-                .for_each(|batch| trace_batch(batch, &bvh, &triangles, &camera, &light_pos));
+            batches.par_iter_mut().for_each(|batch| {
+                trace_batch(
+                    batch,
+                    &bvh,
+                    &triangles,
+                    &camera,
+                    &light_pos,
+                    args.max_bounces,
+                )
+            });
         }
     }
 
