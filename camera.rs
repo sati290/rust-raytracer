@@ -95,7 +95,7 @@ impl Camera {
                 for ray in &subpixel_rays {
                     rays.push(Ray::new(&self.eye_pos, ray, 0.));
                     path_infos.push(PathInfo {
-                        contribution: Vec3::one(),
+                        weight: Vec3::one(),
                         destination_idx: ry * region.width + rx,
                         bounces: 0,
                     })

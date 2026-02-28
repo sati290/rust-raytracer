@@ -12,7 +12,20 @@
 				"kind": "build",
 				"isDefault": true
 			},
-			"label": "rust: cargo build"
+			"label": "rust: cargo build dev-opt"
+		},
+		{
+			"type": "cargo",
+			"command": "build",
+			"args": [],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"label": "rust: cargo build dev"
 		}
 	]
 }

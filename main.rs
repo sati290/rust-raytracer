@@ -1,13 +1,17 @@
 mod aabb;
+mod brdf;
 mod bvh;
 mod camera;
+mod light;
 mod ray;
 mod trace_stats;
 mod triangle;
 mod triangle_opt;
 
+use crate::brdf::Brdf;
 use crate::bvh::Bvh;
 use crate::camera::{Camera, Rect};
+use crate::light::PointLight;
 use crate::ray::Ray;
 use crate::trace_stats::TraceStats;
 use crate::triangle::Triangle;
@@ -21,7 +25,7 @@ use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::fs;
 use std::time::Instant;
-use ultraviolet::{Vec3, Vec3x4, Vec4};
+use ultraviolet::{Rotor3, Vec3, Vec3x4, Vec4};
 use wide::{CmpGe, f32x4};
 
 const NUM_SUBSAMPLES: usize = 4;
@@ -41,27 +45,18 @@ struct Args {
 }
 
 pub struct PathInfo {
-    contribution: Vec3,
+    weight: Vec3,
     destination_idx: u32,
     bounces: u8,
 }
 
-fn color_vec_to_rgb_norm(v: Vec4) -> image::Rgb<u8> {
-    let v = v.xyz() / v.w * 255.;
+fn linear_to_gamma(v: Vec3) -> Vec3 {
+    v.map(|f| f.sqrt())
+}
+
+fn color_vec_to_rgb_norm_gamma(v: Vec4) -> image::Rgb<u8> {
+    let v = linear_to_gamma(v.xyz() / v.w) * 255.;
     image::Rgb([v.x as u8, v.y as u8, v.z as u8])
-}
-
-fn brdf(dir_in: Vec3, dir_out: Vec3, normal: Vec3) -> Vec3 {
-    let ndotl = normal.dot(dir_in);
-    let r = dir_in.reflected(normal);
-    let s = r.dot(dir_out).powf(20.);
-
-    Vec3::one() * (ndotl.clamp(0., 1.) + 0.2 * s.clamp(0., 1.))
-}
-
-fn _brdf_simd(dir_in: Vec3x4, _dir_out: Vec3x4, normal: Vec3x4) -> Vec3x4 {
-    let ndotl = normal.dot(dir_in);
-    Vec3x4::one() * ndotl.max(f32x4::ZERO)
 }
 
 fn trace_batch<R: Rng>(
@@ -69,7 +64,7 @@ fn trace_batch<R: Rng>(
     bvh: &Bvh,
     objects: &[Triangle],
     camera: &Camera,
-    light_pos: &Vec3,
+    light: &PointLight,
     max_bounces: u8,
 ) {
     let num_pixels = (batch.region.width * batch.region.height) as usize;
@@ -100,24 +95,29 @@ fn trace_batch<R: Rng>(
                 let path_info = &ray_infos[i];
                 let hit_obj = &objects[hit_obj_idx as usize];
                 let hit_pos = ray.hit_pos();
-                let ray_dir_inv = -ray.direction.xyz();
 
                 // Shadow ray
-                let shadow_ray_dir = (*light_pos - hit_pos).normalized();
-                let shadow_brdf = brdf(shadow_ray_dir, ray_dir_inv, hit_obj.normal);
+                let shadow_ray_dir = (light.pos - hit_pos).normalized();
+                let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
+                if shadow_weight != Vec3::zero() {
                 shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
                 shadow_ray_infos.push(PathInfo {
-                    contribution: path_info.contribution * shadow_brdf,
+                    weight: path_info.weight * shadow_weight,
                     ..*path_info
                 });
+}
 
                 // Diffuse ray
-                if path_info.bounces < max_bounces - 1 {
-                    let diffuse_ray_dir = ray_dir_inv.reflected(hit_obj.normal);
-                    let diffuse_brdf = brdf(diffuse_ray_dir, ray_dir_inv, hit_obj.normal);
-                    rays[new_rays_len] = Ray::new(&hit_pos, &diffuse_ray_dir, 0.);
+                if path_info.bounces < max_bounces {
+                    let (dir_in_tangent, pdf, brdf) = Brdf::sample_eval(&mut batch.rng);
+                    let tangent_to_world =
+                        Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
+                    let dir_in = tangent_to_world * dir_in_tangent;
+                    let ndotl = hit_obj.normal.dot(dir_in);
+let weight = brdf * ndotl / pdf;
+                    rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
                     ray_infos[new_rays_len] = PathInfo {
-                        contribution: path_info.contribution * diffuse_brdf,
+                        weight: path_info.weight * weight,
                         destination_idx: path_info.destination_idx,
                         bounces: path_info.bounces + 1,
                     };
@@ -135,7 +135,9 @@ fn trace_batch<R: Rng>(
 
     for (ray_info, ray) in shadow_ray_infos.into_iter().zip(shadow_rays.into_iter()) {
         if ray.hit_dist() == f32::INFINITY {
-            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(ray_info.contribution);
+            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
+ray_info.weight * light.intensity / (light.pos - ray.origin_near.xyz()).mag_sq(),
+);
         }
     }
 }
@@ -239,7 +241,7 @@ fn main() {
 
     let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 2500.;
     let cam_target = Vec3::new(0., 350., 0.);
-    let light_pos = Vec3::new(5000., 5000., -10000.);
+    let light = PointLight::new(Vec3::new(5000., 5000., -10000.), Vec3::one(), 3e8);
     let image_width = 1920;
     let image_height = 1080;
 
@@ -295,25 +297,11 @@ fn main() {
         for _ in 0..warmup_frames {
             if args.singlethread {
                 batches.iter_mut().for_each(|batch| {
-                    trace_batch(
-                        batch,
-                        &bvh,
-                        &triangles,
-                        &camera,
-                        &light_pos,
-                        args.max_bounces,
-                    )
+                    trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
                 });
             } else {
                 batches.par_iter_mut().for_each(|batch| {
-                    trace_batch(
-                        batch,
-                        &bvh,
-                        &triangles,
-                        &camera,
-                        &light_pos,
-                        args.max_bounces,
-                    )
+                    trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
                 });
             }
         }
@@ -329,25 +317,11 @@ fn main() {
     for _ in 0..frames {
         if args.singlethread {
             batches.iter_mut().for_each(|batch| {
-                trace_batch(
-                    batch,
-                    &bvh,
-                    &triangles,
-                    &camera,
-                    &light_pos,
-                    args.max_bounces,
-                )
+                trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
             });
         } else {
             batches.par_iter_mut().for_each(|batch| {
-                trace_batch(
-                    batch,
-                    &bvh,
-                    &triangles,
-                    &camera,
-                    &light_pos,
-                    args.max_bounces,
-                )
+                trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
             });
         }
     }
@@ -366,7 +340,7 @@ fn main() {
     trace_stats.print();
 
     let image = RgbImage::from_fn(image_width, image_height, |x, y| {
-        color_vec_to_rgb_norm(pixels[(y * image_width + x) as usize])
+        color_vec_to_rgb_norm_gamma(pixels[(y * image_width + x) as usize])
     });
     let now = Local::now();
     let _ = fs::create_dir("output");

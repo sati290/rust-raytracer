@@ -5,16 +5,52 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(Windows) Launch",
+            "name": "(Windows) Launch dev-opt",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/dev-opt/rust.exe",
-            "args": ["-s"],
+            "args": ["-m", "2"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
             "console": "integratedTerminal",
-            "preLaunchTask": "${defaultBuildTask}"
+            "preLaunchTask": "rust: cargo build dev-opt"
+        },
+        {
+            "name": "(Windows) Launch dev-opt bench",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/dev-opt/rust.exe",
+            "args": ["-b", "-m", "2"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "rust: cargo build dev-opt"
+        },
+        {
+            "name": "(Windows) Launch dev-opt singlethread",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/dev-opt/rust.exe",
+            "args": ["-s", "-m", "2"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "rust: cargo build dev-opt"
+        },
+        {
+            "name": "(Windows) Launch dev singlethread",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/rust.exe",
+            "args": ["-s", "-m", "2"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "rust: cargo build dev"
         }
     ]
 }
