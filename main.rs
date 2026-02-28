@@ -28,20 +28,19 @@ use std::time::Instant;
 use ultraviolet::{Rotor3, Vec3, Vec3x4, Vec4};
 use wide::{CmpGe, f32x4};
 
-const NUM_SUBSAMPLES: usize = 4;
 const BATCH_SIZE: u32 = 64;
 const RNG_SEED: u64 = 1235468;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(short, long)]
-    bench: bool,
+    #[arg(short = 's', long, default_value_t = 128)]
+    samples: u32,
 
-    #[arg(short, long)]
-    singlethread: bool,
-
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short = 'b', long, default_value_t = 1)]
     max_bounces: u8,
+
+    #[arg(long, default_value_t = false)]
+    singlethread: bool,
 }
 
 pub struct PathInfo {
@@ -65,83 +64,87 @@ fn trace_batch<R: Rng>(
     objects: &[Triangle],
     camera: &Camera,
     light: &PointLight,
+    samples: u32,
     max_bounces: u8,
 ) {
+    const SUBSAMPLES_PER_ITER: usize = 4;
+
     let num_pixels = (batch.region.width * batch.region.height) as usize;
-    let max_rays = num_pixels * NUM_SUBSAMPLES;
+    let max_rays = num_pixels * SUBSAMPLES_PER_ITER;
     let mut rays = Vec::with_capacity(max_rays);
     let mut ray_infos = Vec::with_capacity(max_rays);
 
-    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES;
+    let max_shadow_rays = num_pixels * SUBSAMPLES_PER_ITER;
     let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
     let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
     let mut hit_objects = Vec::with_capacity(max_rays.max(max_shadow_rays));
+    for _ in 0..samples.div_ceil(SUBSAMPLES_PER_ITER as u32) {
+        camera.generate_rays_4sp(&batch.region, &mut batch.rng, &mut rays, &mut ray_infos);
+        for p in &mut batch.pixels {
+            p.w += SUBSAMPLES_PER_ITER as f32;
+        }
 
-    camera.generate_rays_4sp(&batch.region, &mut batch.rng, &mut rays, &mut ray_infos);
-    for p in &mut batch.pixels {
-        p.w += NUM_SUBSAMPLES as f32;
-    }
+        while !rays.is_empty() {
+            hit_objects.clear();
+            hit_objects.resize(rays.len(), None);
 
-    while !rays.is_empty() {
-        hit_objects.clear();
-        hit_objects.resize(rays.len(), None);
+            bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
 
-        bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
+            shadow_rays.clear();
+            shadow_ray_infos.clear();
 
-        shadow_rays.clear();
-        shadow_ray_infos.clear();
+            let mut new_rays_len = 0;
+            for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
+                if let &Some(hit_obj_idx) = hit_obj_idx {
+                    let ray = &rays[i];
+                    let path_info = &ray_infos[i];
+                    let hit_obj = &objects[hit_obj_idx as usize];
+                    let hit_pos = ray.hit_pos();
 
-        let mut new_rays_len = 0;
-        for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
-            if let &Some(hit_obj_idx) = hit_obj_idx {
-                let ray = &rays[i];
-                let path_info = &ray_infos[i];
-                let hit_obj = &objects[hit_obj_idx as usize];
-                let hit_pos = ray.hit_pos();
+                    // Shadow ray
+                    let shadow_ray_dir = (light.pos - hit_pos).normalized();
+                    let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
+                    if shadow_weight != Vec3::zero() {
+                        shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
+                        shadow_ray_infos.push(PathInfo {
+                            weight: path_info.weight * shadow_weight,
+                            ..*path_info
+                        });
+                    }
 
-                // Shadow ray
-                let shadow_ray_dir = (light.pos - hit_pos).normalized();
-                let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
-                if shadow_weight != Vec3::zero() {
-                    shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
-                    shadow_ray_infos.push(PathInfo {
-                        weight: path_info.weight * shadow_weight,
-                        ..*path_info
-                    });
-                }
-
-                // Diffuse ray
-                if path_info.bounces < max_bounces {
-                    let (dir_in_tangent, pdf, brdf) = Brdf::sample_eval(&mut batch.rng);
-                    let tangent_to_world =
-                        Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
-                    let dir_in = tangent_to_world * dir_in_tangent;
-                    let ndotl = hit_obj.normal.dot(dir_in);
-                    let weight = brdf * ndotl / pdf;
-                    rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
-                    ray_infos[new_rays_len] = PathInfo {
-                        weight: path_info.weight * weight,
-                        destination_idx: path_info.destination_idx,
-                        bounces: path_info.bounces + 1,
-                    };
-                    new_rays_len += 1;
+                    // Diffuse ray
+                    if path_info.bounces < max_bounces {
+                        let (dir_in_tangent, pdf, brdf) = Brdf::sample_eval(&mut batch.rng);
+                        let tangent_to_world =
+                            Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
+                        let dir_in = tangent_to_world * dir_in_tangent;
+                        let ndotl = hit_obj.normal.dot(dir_in);
+                        let weight = brdf * ndotl / pdf;
+                        rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
+                        ray_infos[new_rays_len] = PathInfo {
+                            weight: path_info.weight * weight,
+                            destination_idx: path_info.destination_idx,
+                            bounces: path_info.bounces + 1,
+                        };
+                        new_rays_len += 1;
+                    }
                 }
             }
-        }
-        rays.truncate(new_rays_len);
-        ray_infos.truncate(new_rays_len);
+            rays.truncate(new_rays_len);
+            ray_infos.truncate(new_rays_len);
 
-        if !shadow_rays.is_empty() {
-            hit_objects.clear();
-            hit_objects.resize(shadow_rays.len(), None);
-            bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
+            if !shadow_rays.is_empty() {
+                hit_objects.clear();
+                hit_objects.resize(shadow_rays.len(), None);
+                bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
 
-            for (ray_info, ray) in shadow_ray_infos.iter().zip(shadow_rays.iter()) {
-                if ray.hit_dist() == f32::INFINITY {
-                    *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
-                        ray_info.weight * light.intensity
-                            / (light.pos - ray.origin_near.xyz()).mag_sq(),
-                    );
+                for (ray_info, ray) in shadow_ray_infos.iter().zip(shadow_rays.iter()) {
+                    if ray.hit_dist() == f32::INFINITY {
+                        *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
+                            ray_info.weight * light.intensity
+                                / (light.pos - ray.origin_near.xyz()).mag_sq(),
+                        );
+                    }
                 }
             }
         }
@@ -265,79 +268,39 @@ fn main() {
     let mut batches =
         generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
 
-    const RAYS_PER_BATCH: usize = BATCH_SIZE as usize * BATCH_SIZE as usize * NUM_SUBSAMPLES;
     println!(
-        "{} {}x{} batches, {} rays/batch",
+        "{} {}x{} batches, {} pixels/batch",
         batches.len(),
         BATCH_SIZE,
         BATCH_SIZE,
-        RAYS_PER_BATCH,
+        BATCH_SIZE * BATCH_SIZE,
     );
-
-    println!(
-        "[Vec3; {0}x{0}] = {1} kbytes",
-        BATCH_SIZE,
-        std::mem::size_of::<[Vec3; (BATCH_SIZE * BATCH_SIZE) as usize]>() as f32 / 1024.
-    );
-    println!(
-        "[Ray; {}] = {} kbytes",
-        RAYS_PER_BATCH,
-        std::mem::size_of::<[Ray; RAYS_PER_BATCH]>() as f32 / 1024.
-    );
-    println!(
-        "[PathInfo; {}] = {} kbytes",
-        RAYS_PER_BATCH,
-        std::mem::size_of::<[PathInfo; RAYS_PER_BATCH]>() as f32 / 1024.
-    );
-    println!(
-        "[Option<usize>; {}] = {} kbytes",
-        RAYS_PER_BATCH,
-        std::mem::size_of::<[Option<usize>; RAYS_PER_BATCH]>() as f32 / 1024.
-    );
-
-    let mut frames = 1;
-    if args.bench {
-        let warmup_start = Instant::now();
-
-        let warmup_frames = 5;
-        for _ in 0..warmup_frames {
-            if args.singlethread {
-                batches.iter_mut().for_each(|batch| {
-                    trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
-                });
-            } else {
-                batches.par_iter_mut().for_each(|batch| {
-                    trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
-                });
-            }
-        }
-
-        let warmup_elapsed = warmup_start.elapsed();
-        println!("warmup {:.2?} for {} frames", warmup_elapsed, warmup_frames);
-
-        frames = (10. / (warmup_elapsed.as_secs_f32() / warmup_frames as f32)).ceil() as u32;
-    }
 
     let time_start = Instant::now();
+    let trace_fn = |batch| {
+        trace_batch(
+            batch,
+            &bvh,
+            &triangles,
+            &camera,
+            &light,
+            args.samples,
+            args.max_bounces,
+        );
+    };
 
-    for _ in 0..frames {
-        if args.singlethread {
-            batches.iter_mut().for_each(|batch| {
-                trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
-            });
-        } else {
-            batches.par_iter_mut().for_each(|batch| {
-                trace_batch(batch, &bvh, &triangles, &camera, &light, args.max_bounces)
-            });
-        }
+    if args.singlethread {
+        batches.iter_mut().for_each(trace_fn);
+    } else {
+        batches.par_iter_mut().for_each(trace_fn);
     }
 
     let elapsed = time_start.elapsed();
     println!(
-        "{:.2?} for {} frames, {:.2?}/frame",
+        "{:.2?} for {} samples, {:.2} samples/sec",
         elapsed,
-        frames,
-        elapsed / frames
+        args.samples,
+        args.samples as f32 / elapsed.as_secs_f32()
     );
 
     let trace_stats = batches
