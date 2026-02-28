@@ -142,9 +142,7 @@ fn trace_batch<R: Rng>(
 
 fn load_scene() -> Vec<Triangle> {
     let load_start = Instant::now();
-
-    // Model from http://graphics.stanford.edu/data/3Dscanrep/
-    let obj = Obj::load("./data/asian_dragon_obj/asian_dragon.obj").unwrap();
+    let obj = Obj::load("./scenes/asian_dragon_obj/asian_dragon.obj").unwrap();
 
     let mut triangles = vec![];
     for o in &obj.data.objects {
