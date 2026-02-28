@@ -72,7 +72,7 @@ fn trace_batch<R: Rng>(
     let mut rays = Vec::with_capacity(max_rays);
     let mut ray_infos = Vec::with_capacity(max_rays);
 
-    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES * max_bounces as usize;
+    let max_shadow_rays = num_pixels * NUM_SUBSAMPLES;
     let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
     let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
     let mut hit_objects = Vec::with_capacity(max_rays.max(max_shadow_rays));
@@ -88,6 +88,9 @@ fn trace_batch<R: Rng>(
 
         bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
 
+        shadow_rays.clear();
+        shadow_ray_infos.clear();
+
         let mut new_rays_len = 0;
         for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
             if let &Some(hit_obj_idx) = hit_obj_idx {
@@ -100,12 +103,12 @@ fn trace_batch<R: Rng>(
                 let shadow_ray_dir = (light.pos - hit_pos).normalized();
                 let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
                 if shadow_weight != Vec3::zero() {
-                shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
-                shadow_ray_infos.push(PathInfo {
-                    weight: path_info.weight * shadow_weight,
-                    ..*path_info
-                });
-}
+                    shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
+                    shadow_ray_infos.push(PathInfo {
+                        weight: path_info.weight * shadow_weight,
+                        ..*path_info
+                    });
+                }
 
                 // Diffuse ray
                 if path_info.bounces < max_bounces {
@@ -114,7 +117,7 @@ fn trace_batch<R: Rng>(
                         Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
                     let dir_in = tangent_to_world * dir_in_tangent;
                     let ndotl = hit_obj.normal.dot(dir_in);
-let weight = brdf * ndotl / pdf;
+                    let weight = brdf * ndotl / pdf;
                     rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
                     ray_infos[new_rays_len] = PathInfo {
                         weight: path_info.weight * weight,
@@ -127,17 +130,20 @@ let weight = brdf * ndotl / pdf;
         }
         rays.truncate(new_rays_len);
         ray_infos.truncate(new_rays_len);
-    }
 
-    hit_objects.clear();
-    hit_objects.resize(shadow_rays.len(), None);
-    bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
+        if !shadow_rays.is_empty() {
+            hit_objects.clear();
+            hit_objects.resize(shadow_rays.len(), None);
+            bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
 
-    for (ray_info, ray) in shadow_ray_infos.into_iter().zip(shadow_rays.into_iter()) {
-        if ray.hit_dist() == f32::INFINITY {
-            *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
-ray_info.weight * light.intensity / (light.pos - ray.origin_near.xyz()).mag_sq(),
-);
+            for (ray_info, ray) in shadow_ray_infos.iter().zip(shadow_rays.iter()) {
+                if ray.hit_dist() == f32::INFINITY {
+                    *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
+                        ray_info.weight * light.intensity
+                            / (light.pos - ray.origin_near.xyz()).mag_sq(),
+                    );
+                }
+            }
         }
     }
 }
