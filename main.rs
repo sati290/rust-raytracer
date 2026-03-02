@@ -10,7 +10,7 @@ mod triangle_opt;
 
 use crate::brdf::Brdf;
 use crate::bvh::Bvh;
-use crate::camera::{Camera, Rect};
+use crate::camera::{Camera, CameraRayGenerator, Rect};
 use crate::light::PointLight;
 use crate::ray::Ray;
 use crate::trace_stats::TraceStats;
@@ -28,7 +28,7 @@ use std::time::Instant;
 use ultraviolet::{Rotor3, Vec3, Vec3x4, Vec4};
 use wide::{CmpGe, f32x4};
 
-const BATCH_SIZE: u32 = 64;
+const BATCH_SIZE: u32 = 16;
 const RNG_SEED: u64 = 1235468;
 
 #[derive(Parser, Debug)]
@@ -58,8 +58,44 @@ fn color_vec_to_rgb_norm_gamma(v: Vec4) -> image::Rgb<u8> {
     image::Rgb([v.x as u8, v.y as u8, v.z as u8])
 }
 
-fn trace_batch<R: Rng>(
-    batch: &mut Batch<R>,
+fn generate_rays<R: Rng>(
+    camera: &Camera,
+    region: &Rect,
+    samples: u32,
+    rng: &mut R,
+    rays: &mut Vec<Ray>,
+    path_infos: &mut Vec<PathInfo>,
+) {
+    let mut generator = CameraRayGenerator::new(camera, *region);
+    while !generator.is_done() {
+        for _ in 0..samples / 8 {
+            let dirs: [Vec3; 8] = generator.sample8(rng).into();
+            for d in dirs {
+                rays.push(Ray::new(&camera.position(), &d, 0.));
+                path_infos.push(PathInfo {
+                    weight: Vec3::one(),
+                    destination_idx: generator.current_pixel_idx(),
+                    bounces: 0,
+                });
+            }
+        }
+
+        for _ in 0..samples % 8 {
+            let dir = generator.sample(rng);
+            rays.push(Ray::new(&camera.position(), &dir, 0.));
+            path_infos.push(PathInfo {
+                weight: Vec3::one(),
+                destination_idx: generator.current_pixel_idx(),
+                bounces: 0,
+            });
+        }
+
+        generator.next_pixel();
+    }
+}
+
+fn trace_tile<R: Rng>(
+    tile: &mut Tile<R>,
     bvh: &Bvh,
     objects: &[Triangle],
     camera: &Camera,
@@ -67,84 +103,88 @@ fn trace_batch<R: Rng>(
     samples: u32,
     max_bounces: u8,
 ) {
-    const SUBSAMPLES_PER_ITER: usize = 4;
-
-    let num_pixels = (batch.region.width * batch.region.height) as usize;
-    let max_rays = num_pixels * SUBSAMPLES_PER_ITER;
+    let max_rays = (tile.region.width * tile.region.height * samples) as usize;
     let mut rays = Vec::with_capacity(max_rays);
     let mut ray_infos = Vec::with_capacity(max_rays);
 
-    let max_shadow_rays = num_pixels * SUBSAMPLES_PER_ITER;
+    generate_rays(
+        camera,
+        &tile.region,
+        samples,
+        &mut tile.rng,
+        &mut rays,
+        &mut ray_infos,
+    );
+
+    for p in &mut tile.pixels {
+        p.w += samples as f32;
+    }
+
+    let max_shadow_rays = max_rays;
     let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
     let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
     let mut hit_objects = Vec::with_capacity(max_rays.max(max_shadow_rays));
-    for _ in 0..samples.div_ceil(SUBSAMPLES_PER_ITER as u32) {
-        camera.generate_rays_4sp(&batch.region, &mut batch.rng, &mut rays, &mut ray_infos);
-        for p in &mut batch.pixels {
-            p.w += SUBSAMPLES_PER_ITER as f32;
-        }
 
-        while !rays.is_empty() {
-            hit_objects.clear();
-            hit_objects.resize(rays.len(), None);
+    while !rays.is_empty() {
+        hit_objects.clear();
+        hit_objects.resize(rays.len(), None);
 
-            bvh.trace_stream(&mut rays, &mut hit_objects, &mut batch.trace_stats);
+        bvh.trace_stream(&mut rays, &mut hit_objects, &mut tile.trace_stats);
 
-            shadow_rays.clear();
-            shadow_ray_infos.clear();
+        shadow_rays.clear();
+        shadow_ray_infos.clear();
 
-            let mut new_rays_len = 0;
-            for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
-                if let &Some(hit_obj_idx) = hit_obj_idx {
-                    let ray = &rays[i];
-                    let path_info = &ray_infos[i];
-                    let hit_obj = &objects[hit_obj_idx as usize];
-                    let hit_pos = ray.hit_pos();
+        let mut new_rays_len = 0;
+        for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
+            if let &Some(hit_obj_idx) = hit_obj_idx {
+                let ray = &rays[i];
+                let path_info = &ray_infos[i];
+                let hit_obj = &objects[hit_obj_idx as usize];
+                let hit_pos = ray.hit_pos();
 
-                    // Shadow ray
-                    let shadow_ray_dir = (light.pos - hit_pos).normalized();
-                    let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
-                    if shadow_weight != Vec3::zero() {
-                        shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
-                        shadow_ray_infos.push(PathInfo {
-                            weight: path_info.weight * shadow_weight,
-                            ..*path_info
-                        });
-                    }
+                // Shadow ray
+                let shadow_ray_dir = (light.pos - hit_pos).normalized();
+                let shadow_weight = Brdf::eval() * hit_obj.normal.dot(shadow_ray_dir).max(0.);
+                if shadow_weight != Vec3::zero() {
+                    shadow_rays.push(Ray::new(&hit_pos, &shadow_ray_dir, 0.));
+                    shadow_ray_infos.push(PathInfo {
+                        weight: path_info.weight * shadow_weight,
+                        ..*path_info
+                    });
+                }
 
-                    // Diffuse ray
-                    if path_info.bounces < max_bounces {
-                        let (dir_in_tangent, pdf, brdf) = Brdf::sample_eval(&mut batch.rng);
-                        let tangent_to_world =
-                            Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
-                        let dir_in = tangent_to_world * dir_in_tangent;
-                        let ndotl = hit_obj.normal.dot(dir_in);
-                        let weight = brdf * ndotl / pdf;
-                        rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
-                        ray_infos[new_rays_len] = PathInfo {
-                            weight: path_info.weight * weight,
-                            destination_idx: path_info.destination_idx,
-                            bounces: path_info.bounces + 1,
-                        };
-                        new_rays_len += 1;
-                    }
+                // Diffuse ray
+                if path_info.bounces < max_bounces {
+                    let (dir_in_tangent, pdf, brdf) = Brdf::sample_eval(&mut tile.rng);
+                    let tangent_to_world =
+                        Rotor3::from_rotation_between(Vec3::unit_z(), hit_obj.normal);
+                    let dir_in = tangent_to_world * dir_in_tangent;
+                    let ndotl = hit_obj.normal.dot(dir_in);
+                    let weight = brdf * ndotl / pdf;
+                    rays[new_rays_len] = Ray::new(&hit_pos, &dir_in, 0.);
+                    ray_infos[new_rays_len] = PathInfo {
+                        weight: path_info.weight * weight,
+                        destination_idx: path_info.destination_idx,
+                        bounces: path_info.bounces + 1,
+                    };
+                    new_rays_len += 1;
                 }
             }
-            rays.truncate(new_rays_len);
-            ray_infos.truncate(new_rays_len);
+        }
+        rays.truncate(new_rays_len);
+        ray_infos.truncate(new_rays_len);
 
-            if !shadow_rays.is_empty() {
-                hit_objects.clear();
-                hit_objects.resize(shadow_rays.len(), None);
-                bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut batch.trace_stats);
+        if !shadow_rays.is_empty() {
+            hit_objects.clear();
+            hit_objects.resize(shadow_rays.len(), None);
+            bvh.trace_stream(&mut shadow_rays, &mut hit_objects, &mut tile.trace_stats);
 
-                for (ray_info, ray) in shadow_ray_infos.iter().zip(shadow_rays.iter()) {
-                    if ray.hit_dist() == f32::INFINITY {
-                        *batch.pixels[ray_info.destination_idx as usize] += Vec4::from(
-                            ray_info.weight * light.intensity
-                                / (light.pos - ray.origin_near.xyz()).mag_sq(),
-                        );
-                    }
+            for (ray_info, ray) in shadow_ray_infos.iter().zip(shadow_rays.iter()) {
+                if ray.hit_dist() == f32::INFINITY {
+                    *tile.pixels[ray_info.destination_idx as usize] += Vec4::from(
+                        ray_info.weight * light.intensity
+                            / (light.pos - ray.origin_near.xyz()).mag_sq(),
+                    );
                 }
             }
         }
@@ -183,16 +223,16 @@ fn load_scene() -> Vec<Triangle> {
     triangles
 }
 
-struct Batch<'a, R: Rng> {
+struct Tile<'a, R: Rng> {
     region: Rect,
     pixels: Vec<&'a mut Vec4>,
     rng: R,
     trace_stats: TraceStats,
 }
 
-impl<R: Rng> Batch<'_, R> {
+impl<R: Rng> Tile<'_, R> {
     fn new(region: Rect, rng: R) -> Self {
-        Batch {
+        Tile {
             region,
             pixels: Vec::new(),
             rng,
@@ -201,13 +241,13 @@ impl<R: Rng> Batch<'_, R> {
     }
 }
 
-fn generate_batches<'a, R: Rng>(
+fn generate_tiles<'a, R: Rng>(
     pixels: &'a mut [Vec4],
     image_width: u32,
     image_height: u32,
     batch_size: u32,
     rng: &mut R,
-) -> Vec<Batch<'a, SmallRng>> {
+) -> Vec<Tile<'a, SmallRng>> {
     let num_regions_x = image_width.div_ceil(batch_size);
     let num_regions_y = image_height.div_ceil(batch_size);
 
@@ -224,7 +264,7 @@ fn generate_batches<'a, R: Rng>(
                 width,
                 height,
             };
-            batches.push(Batch::new(rect, SmallRng::from_rng(rng)));
+            batches.push(Tile::new(rect, SmallRng::from_rng(rng)));
         }
     }
 
@@ -265,20 +305,21 @@ fn main() {
 
     let mut rng = SmallRng::seed_from_u64(RNG_SEED);
     let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
-    let mut batches =
-        generate_batches(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
+    let mut tiles = generate_tiles(&mut pixels, image_width, image_height, BATCH_SIZE, &mut rng);
 
     println!(
-        "{} {}x{} batches, {} pixels/batch",
-        batches.len(),
+        "{} {}x{} tiles, {} pixels/tile, {} samples/pixel, {} total samples/tile",
+        tiles.len(),
         BATCH_SIZE,
         BATCH_SIZE,
         BATCH_SIZE * BATCH_SIZE,
+        args.samples,
+        BATCH_SIZE * BATCH_SIZE * args.samples
     );
 
     let time_start = Instant::now();
     let trace_fn = |batch| {
-        trace_batch(
+        trace_tile(
             batch,
             &bvh,
             &triangles,
@@ -290,9 +331,9 @@ fn main() {
     };
 
     if args.singlethread {
-        batches.iter_mut().for_each(trace_fn);
+        tiles.iter_mut().for_each(trace_fn);
     } else {
-        batches.par_iter_mut().for_each(trace_fn);
+        tiles.par_iter_mut().for_each(trace_fn);
     }
 
     let elapsed = time_start.elapsed();
@@ -303,7 +344,7 @@ fn main() {
         args.samples as f32 / elapsed.as_secs_f32()
     );
 
-    let trace_stats = batches
+    let trace_stats = tiles
         .iter()
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     trace_stats.print();
