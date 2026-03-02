@@ -48,7 +48,8 @@ impl AddAssign for BvhStats {
 
 enum BvhNode {
     Inner {
-        child_bbox: [Aabb; 2],
+        // minl, minr, maxl, maxr
+        child_bbox: Vec3x4,
         children: [Box<BvhNode>; 2],
     },
     Leaf {
@@ -202,7 +203,12 @@ impl Bvh {
                 *stats += stats_r;
 
                 BvhNode::Inner {
-                    child_bbox: [bounds_l, bounds_r],
+                    child_bbox: Vec3x4::from([
+                        bounds_l.min,
+                        bounds_r.min,
+                        bounds_l.max,
+                        bounds_r.max,
+                    ]),
                     children: [Box::new(child_left), Box::new(child_right)],
                 }
             }
@@ -241,26 +247,9 @@ impl Bvh {
                 } => {
                     stats.inner_visit(1);
 
-                    let bb_min_max_x = m128::from([
-                        child_bbox[0].min.x,
-                        child_bbox[1].min.x,
-                        child_bbox[0].max.x,
-                        child_bbox[1].max.x,
-                    ]);
-
-                    let bb_min_max_y = m128::from([
-                        child_bbox[0].min.y,
-                        child_bbox[1].min.y,
-                        child_bbox[0].max.y,
-                        child_bbox[1].max.y,
-                    ]);
-
-                    let bb_min_max_z = m128::from([
-                        child_bbox[0].min.z,
-                        child_bbox[1].min.z,
-                        child_bbox[0].max.z,
-                        child_bbox[1].max.z,
-                    ]);
+                    let bb_min_max_x = m128::from(child_bbox.x.to_array());
+                    let bb_min_max_y = m128::from(child_bbox.y.to_array());
+                    let bb_min_max_z = m128::from(child_bbox.z.to_array());
 
                     let bb_max_min_x =
                         shuffle_abi_f32_all_m128::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x);
@@ -355,24 +344,9 @@ impl Bvh {
 
                     let neg_mask = set_splat_m256(-0.);
                     let pos_neg_mask = m256::from([0., 0., -0., -0., 0., 0., -0., -0.]);
-                    let bb_min_max_x = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.x,
-                        child_bbox[1].min.x,
-                        child_bbox[0].max.x,
-                        child_bbox[1].max.x,
-                    ]));
-                    let bb_min_max_y = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.y,
-                        child_bbox[1].min.y,
-                        child_bbox[0].max.y,
-                        child_bbox[1].max.y,
-                    ]));
-                    let bb_min_max_z = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.z,
-                        child_bbox[1].min.z,
-                        child_bbox[0].max.z,
-                        child_bbox[1].max.z,
-                    ]));
+                    let bb_min_max_x = load_m128_splat_m256(&m128::from(child_bbox.x.to_array()));
+                    let bb_min_max_y = load_m128_splat_m256(&m128::from(child_bbox.y.to_array()));
+                    let bb_min_max_z = load_m128_splat_m256(&m128::from(child_bbox.z.to_array()));
 
                     let bb_max_min_x =
                         shuffle_m256::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x) ^ pos_neg_mask;
@@ -554,24 +528,9 @@ impl Bvh {
 
                     let neg_mask = set_splat_m256(-0.);
                     let pos_neg_mask = m256::from([0., 0., -0., -0., 0., 0., -0., -0.]);
-                    let bb_min_max_x = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.x,
-                        child_bbox[1].min.x,
-                        child_bbox[0].max.x,
-                        child_bbox[1].max.x,
-                    ]));
-                    let bb_min_max_y = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.y,
-                        child_bbox[1].min.y,
-                        child_bbox[0].max.y,
-                        child_bbox[1].max.y,
-                    ]));
-                    let bb_min_max_z = load_m128_splat_m256(&m128::from([
-                        child_bbox[0].min.z,
-                        child_bbox[1].min.z,
-                        child_bbox[0].max.z,
-                        child_bbox[1].max.z,
-                    ]));
+                    let bb_min_max_x = load_m128_splat_m256(&m128::from(child_bbox.x.to_array()));
+                    let bb_min_max_y = load_m128_splat_m256(&m128::from(child_bbox.y.to_array()));
+                    let bb_min_max_z = load_m128_splat_m256(&m128::from(child_bbox.z.to_array()));
 
                     let bb_max_min_x =
                         shuffle_m256::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x) ^ pos_neg_mask;
