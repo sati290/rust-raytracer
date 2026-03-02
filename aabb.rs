@@ -63,23 +63,30 @@ impl Aabb {
 
     #[must_use]
     pub fn _intersect(&self, ray_origin: &Vec3, ray_direction_recip: &Vec3) -> bool {
-        let tx1 = (self.min.x - ray_origin.x) * ray_direction_recip.x;
-        let tx2 = (self.max.x - ray_origin.x) * ray_direction_recip.x;
+        let bb_x = [self.min.x, self.max.x];
+        let bb_y = [self.min.y, self.max.y];
+        let bb_z = [self.min.z, self.max.z];
+        let origin_dir_recip = *ray_origin * *ray_direction_recip;
 
-        let tmin = tx1.min(tx2);
-        let tmax = tx1.max(tx2);
+        let sign_x = ray_direction_recip.x.is_sign_positive();
+        let sign_y = ray_direction_recip.y.is_sign_positive();
+        let sign_z = ray_direction_recip.z.is_sign_positive();
+        let bb_min = Vec3::new(
+            bb_x[!sign_x as usize],
+            bb_y[!sign_y as usize],
+            bb_z[!sign_z as usize],
+        );
+        let bb_max = Vec3::new(
+            bb_x[sign_x as usize],
+            bb_y[sign_y as usize],
+            bb_z[sign_z as usize],
+        );
 
-        let ty1 = (self.min.y - ray_origin.y) * ray_direction_recip.y;
-        let ty2 = (self.max.y - ray_origin.y) * ray_direction_recip.y;
+        let tmin = bb_min.mul_add(*ray_direction_recip, -origin_dir_recip);
+        let tmax = bb_max.mul_add(*ray_direction_recip, -origin_dir_recip);
 
-        let tmin = tmin.max(ty1.min(ty2));
-        let tmax = tmax.min(ty1.max(ty2));
-
-        let tz1 = (self.min.z - ray_origin.z) * ray_direction_recip.z;
-        let tz2 = (self.max.z - ray_origin.z) * ray_direction_recip.z;
-
-        let tmin = tmin.max(tz1.min(tz2));
-        let tmax = tmax.min(tz1.max(tz2));
+        let tmin = tmin.component_max();
+        let tmax = tmax.component_min();
 
         tmax >= tmin.max(0.)
     }

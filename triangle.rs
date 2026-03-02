@@ -145,10 +145,10 @@ impl Triangle {
             tris[1].verts[2],
         ]);
         let origin = Vec3x4::from([
-            rays[0].origin_near.xyz(),
-            rays[1].origin_near.xyz(),
-            rays[0].origin_near.xyz(),
-            rays[1].origin_near.xyz(),
+            rays[0].origin_far.xyz(),
+            rays[1].origin_far.xyz(),
+            rays[0].origin_far.xyz(),
+            rays[1].origin_far.xyz(),
         ]);
         let direction = Vec3x4::from([
             rays[0].direction.xyz(),

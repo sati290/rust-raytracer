@@ -12,7 +12,7 @@ pub struct TriangleOpt {
 
 impl TriangleOpt {
     #[must_use]
-    pub fn _intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> f32 {
+    pub fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> f32 {
         let pvec = ray_direction.cross(self.v0v1);
         let det = self.v0v2.dot(pvec);
 
