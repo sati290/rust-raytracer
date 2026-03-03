@@ -220,8 +220,7 @@ impl Bvh {
 
         stats.trace_start(1);
 
-        let mut stack = ArrayVec::<_, 32>::new();
-        stack.push(&self.root_node);
+        let mut stack = ArrayVec::<&BvhNode, 32>::new();
 
         let origin_xyz_far = m128::from(*ray.origin_far.as_array());
         let origin_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(origin_xyz_far, origin_xyz_far);
@@ -239,7 +238,8 @@ impl Bvh {
         let origin_dir_recip_y = origin_y * dir_recip_y;
         let origin_dir_recip_z = origin_z * dir_recip_z;
 
-        while let Some(node) = stack.pop() {
+        let mut cur_node = Some(&self.root_node);
+        while let Some(node) = cur_node {
             match node {
                 BvhNode::Inner {
                     child_bbox,
@@ -278,12 +278,19 @@ impl Bvh {
                     )
                     .to_array();
 
-                    if tnear_far[0] < tnear_far[2] {
-                        stack.push(&children[0]);
-                    }
+                    let hit_l = tnear_far[0] < tnear_far[2];
+                    let hit_r = tnear_far[1] < tnear_far[3];
 
-                    if tnear_far[1] < tnear_far[3] {
-                        stack.push(&children[1]);
+                    if hit_l {
+                        cur_node = Some(&children[0]);
+
+                        if hit_r {
+                            stack.push(&children[1]);
+                        }
+                    } else if hit_r {
+                        cur_node = Some(&children[1]);
+                    } else {
+                        cur_node = stack.pop();
                     }
                 }
                 BvhNode::Leaf { triangles_range } => {
@@ -295,6 +302,8 @@ impl Bvh {
                             return true;
                         }
                     }
+
+                    cur_node = stack.pop();
                 }
             }
         }
