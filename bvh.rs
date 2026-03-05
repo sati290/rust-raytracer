@@ -14,6 +14,7 @@ type RayIdx = u32;
 struct BvhStats {
     num_leaves: u32,
     max_depth: u32,
+    max_objs: u32,
 }
 
 impl BvhStats {
@@ -21,12 +22,14 @@ impl BvhStats {
         BvhStats {
             num_leaves: 0,
             max_depth: 0,
+            max_objs: 0,
         }
     }
 
-    fn add_leaf(&mut self, depth: u32) {
+    fn add_leaf(&mut self, depth: u32, objs: u32) {
         self.num_leaves += 1;
         self.max_depth = self.max_depth.max(depth);
+        self.max_objs = self.max_objs.max(objs);
     }
 }
 
@@ -43,6 +46,7 @@ impl AddAssign for BvhStats {
     fn add_assign(&mut self, rhs: Self) {
         self.num_leaves += rhs.num_leaves;
         self.max_depth = self.max_depth.max(rhs.max_depth);
+        self.max_objs = self.max_objs.max(rhs.max_objs);
     }
 }
 
@@ -91,14 +95,16 @@ impl Bvh {
         depth: u32,
         stats: &mut BvhStats,
     ) -> BvhNode {
-        match indices.len() {
-            1..=8 => {
-                stats.add_leaf(depth);
+        let mut leaf = || {
+            stats.add_leaf(depth, indices.len() as u32);
 
-                BvhNode::Leaf {
-                    triangles_range: indices_start_idx..indices_start_idx + indices.len(),
-                }
+            BvhNode::Leaf {
+                triangles_range: indices_start_idx..indices_start_idx + indices.len(),
             }
+        };
+
+        match indices.len() {
+            1..=8 => leaf(),
             _ => {
                 let mut bounds = Aabb::empty();
                 let mut centroid_bounds = Aabb::empty();
@@ -109,6 +115,17 @@ impl Bvh {
                 }
 
                 let size = centroid_bounds.size();
+
+                if centroid_bounds.size().mag_sq() == 0. {
+                    println!(
+                        "centroid_bounds.size() == 0, adding leaf with {} objects, depth {}",
+                        indices.len(),
+                        depth
+                    );
+
+                    return leaf();
+                }
+
                 let largest_axis = if size.x > size.y && size.x > size.z {
                     0
                 } else if size.y > size.z {
@@ -215,6 +232,54 @@ impl Bvh {
         }
     }
 
+    pub fn _occluded1_simple(&self, ray: &Ray, stats: &mut TraceStats) -> bool {
+        stats.trace_start(1);
+
+        let mut stack = ArrayVec::<&BvhNode, 32>::new();
+        stack.push(&self.root_node);
+
+        while let Some(node) = stack.pop() {
+            match node {
+                BvhNode::Inner {
+                    child_bbox,
+                    children,
+                } => {
+                    stats.inner_visit(1);
+
+                    let bb: [Vec3; 4] = (*child_bbox).into();
+                    let bb_l = Aabb {
+                        min: bb[0],
+                        max: bb[2],
+                    };
+                    let bb_r = Aabb {
+                        min: bb[1],
+                        max: bb[3],
+                    };
+
+                    if bb_l._intersect(&ray.origin_far.xyz(), &ray.direction_recip_near.xyz()) {
+                        stack.push(&children[0]);
+                    }
+
+                    if bb_r._intersect(&ray.origin_far.xyz(), &ray.direction_recip_near.xyz()) {
+                        stack.push(&children[1]);
+                    }
+                }
+                BvhNode::Leaf { triangles_range } => {
+                    stats.leaf_visit(1, triangles_range.len() as u64);
+                    for obj_idx in triangles_range.clone() {
+                        let obj = &self.triangles[obj_idx];
+                        let hit = obj.intersect(&ray.origin_far.xyz(), &ray.direction.xyz());
+                        if (ray.direction_recip_near.w..ray.origin_far.w).contains(&hit) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn occluded1(&self, ray: &Ray, stats: &mut TraceStats) -> bool {
         use safe_arch::*;
 
@@ -233,6 +298,8 @@ impl Bvh {
             shuffle_abi_f32_all_m128::<0b01_01_01_01>(dir_recip_xyz_near, dir_recip_xyz_near);
         let dir_recip_z =
             shuffle_abi_f32_all_m128::<0b10_10_10_10>(dir_recip_xyz_near, dir_recip_xyz_near);
+        let ray_near_far =
+            shuffle_abi_f32_all_m128::<0b11_11_11_11>(dir_recip_xyz_near, origin_xyz_far);
 
         let origin_dir_recip_x = origin_x * dir_recip_x;
         let origin_dir_recip_y = origin_y * dir_recip_y;
@@ -269,17 +336,20 @@ impl Bvh {
                     let tnear_far_z =
                         fused_mul_sub_m128(bb_near_far_z, dir_recip_z, origin_dir_recip_z);
 
-                    let tnear = max_m128(max_m128(tnear_far_x, tnear_far_y), tnear_far_z);
-                    let tfar = min_m128(min_m128(tnear_far_x, tnear_far_y), tnear_far_z);
+                    let tnear = max_m128(
+                        max_m128(tnear_far_x, tnear_far_y),
+                        max_m128(tnear_far_z, ray_near_far),
+                    );
+                    let tfar = min_m128(
+                        min_m128(tnear_far_x, tnear_far_y),
+                        min_m128(tnear_far_z, ray_near_far),
+                    );
 
-                    let tnear_far = shuffle_abi_f32_all_m128::<0b_11_10_01_00>(
-                        max_m128(tnear, zeroed_m128()),
-                        tfar,
-                    )
-                    .to_array();
+                    let tnear_far =
+                        shuffle_abi_f32_all_m128::<0b_11_10_01_00>(tnear, tfar).to_array();
 
-                    let hit_l = tnear_far[0] < tnear_far[2];
-                    let hit_r = tnear_far[1] < tnear_far[3];
+                    let hit_l = tnear_far[0] <= tnear_far[2];
+                    let hit_r = tnear_far[1] <= tnear_far[3];
 
                     if hit_l {
                         cur_node = Some(&children[0]);
@@ -298,7 +368,7 @@ impl Bvh {
                     for obj_idx in triangles_range.clone() {
                         let obj = &self.triangles[obj_idx];
                         let hit = obj.intersect(&ray.origin_far.xyz(), &ray.direction.xyz());
-                        if (ray.direction_recip_near.w..f32::INFINITY).contains(&hit) {
+                        if (ray.direction_recip_near.w..ray.origin_far.w).contains(&hit) {
                             return true;
                         }
                     }

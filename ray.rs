@@ -9,10 +9,10 @@ pub struct Ray {
 
 impl Ray {
     #[must_use]
-    pub fn new(origin: &Vec3, direction: &Vec3, near: f32) -> Self {
+    pub fn new(origin: &Vec3, direction: &Vec3, near: f32, far: f32) -> Self {
         let dir_recip = Vec3::one() / *direction;
         Ray {
-            origin_far: Vec4::new(origin.x, origin.y, origin.z, f32::INFINITY),
+            origin_far: Vec4::new(origin.x, origin.y, origin.z, far),
             direction: Vec4::from(*direction),
             direction_recip_near: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, near),
         }

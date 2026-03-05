@@ -16,8 +16,7 @@ impl TriangleOpt {
         let pvec = ray_direction.cross(self.v0v1);
         let det = self.v0v2.dot(pvec);
 
-        let epsilon = 0.0000001;
-        if det < epsilon {
+        if det.abs() < f32::EPSILON {
             return f32::INFINITY;
         }
 
@@ -31,7 +30,7 @@ impl TriangleOpt {
 
         let qvec = tvec.cross(self.v0v2);
         let v = ray_direction.dot(qvec) * inv_det;
-        if !(0. ..=1.).contains(&v) {
+        if v < 0. || u + v > 1. {
             return f32::INFINITY;
         }
 
@@ -45,8 +44,8 @@ impl TriangleOpt {
         let pvec = ray_direction.cross(v0v1);
         let det = v0v2.dot(pvec);
 
-        let epsilon = f32x4::splat(0.0000001);
-        let det_valid = det.cmp_ge(epsilon);
+        let epsilon = f32x4::splat(f32::EPSILON);
+        let det_valid = det.abs().cmp_ge(epsilon);
 
         let inv_det = 1. / det;
 
@@ -56,7 +55,7 @@ impl TriangleOpt {
 
         let qvec = tvec.cross(v0v2);
         let v = ray_direction.dot(qvec) * inv_det;
-        let v_valid = v.cmp_ge(0.) & v.cmp_le(1.);
+        let v_valid = v.cmp_ge(0.) & (u + v).cmp_le(1.);
 
         let t = v0v1.dot(qvec) * inv_det;
 

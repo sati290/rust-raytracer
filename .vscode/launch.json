@@ -41,11 +41,35 @@
             "preLaunchTask": "rust: cargo build dev-opt"
         },
         {
+            "name": "(Windows) Launch dev-opt singlethread sanmiguel",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/dev-opt/rust.exe",
+            "args": ["--singlethread", "-s", "san-miguel", "-b", "1"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "rust: cargo build dev-opt"
+        },
+        {
             "name": "(Windows) Launch dev singlethread",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/rust.exe",
             "args": ["--singlethread", "-b", "2"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "rust: cargo build dev"
+        },
+        {
+            "name": "(Windows) Launch dev singlethread sanmiguel",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/rust.exe",
+            "args": ["--singlethread", "-s", "san-miguel", "-b", "1", "-n", "1"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],

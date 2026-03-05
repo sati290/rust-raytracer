@@ -25,16 +25,23 @@ impl Brdf {
         sample_cosine_weighted_hemisphere(rng)
     }
 
-    pub fn sample_eval<R: Rng>(rng: &mut R) -> (Vec3, f32, Vec3) {
-        let dir_in = Self::sample(rng);
-        let pfd = Self::pdf(dir_in);
+    #[must_use]
+    pub fn sample_eval<R: Rng>(dir_out: &Vec3, rng: &mut R) -> (Vec3, f32, Vec3) {
+        let mut dir_in = Self::sample(rng);
+        let pfd = dir_in.z / PI;
         let f = Self::eval();
+
+        dir_in.z = dir_in.z.copysign(dir_out.z);
 
         (dir_in, pfd, f)
     }
 
     #[must_use]
-    pub fn pdf(dir_in: Vec3) -> f32 {
-        dir_in.z / PI
+    pub fn _pdf(dir_out: Vec3, dir_in: Vec3) -> f32 {
+        if dir_out.z * dir_in.z > 0. {
+            dir_in.z / PI
+        } else {
+            0.
+        }
     }
 }
