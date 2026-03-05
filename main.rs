@@ -15,7 +15,7 @@ use crate::brdf::Brdf;
 use crate::camera::{Camera, CameraRayGenerator, Rect};
 use crate::light::PointLight;
 use crate::ray::Ray;
-use crate::scene::Scene;
+use crate::scene::{SCENE_ASIAN_DRAGON, SCENE_SANMIGUEL, Scene};
 use crate::trace_stats::TraceStats;
 use chrono::Local;
 use clap::Parser as _;
@@ -49,13 +49,14 @@ fn color_vec_to_rgb_norm_gamma(v: Vec4) -> image::Rgb<u8> {
 
 fn generate_rays<R: Rng>(
     camera: &Camera,
+    viewport_size: (u32, u32),
     region: &Rect,
     samples: u32,
     rng: &mut R,
     rays: &mut Vec<Ray>,
     path_infos: &mut Vec<PathInfo>,
 ) {
-    let mut generator = CameraRayGenerator::new(camera, *region);
+    let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
     while !generator.is_done() {
         for _ in 0..samples / 8 {
             let dirs: [Vec3; 8] = generator.sample8(rng).into();
@@ -122,7 +123,13 @@ fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) -> (Ve
     (dir_in, weight)
 }
 
-fn trace_tile_stream<R: Rng>(tile: &mut Tile<R>, scene: &Scene, samples: u32, max_bounces: u8) {
+fn trace_tile_stream<R: Rng>(
+    tile: &mut Tile<R>,
+    viewport_size: (u32, u32),
+    scene: &Scene,
+    samples: u32,
+    max_bounces: u8,
+) {
     let Scene {
         objects,
         bvh,
@@ -137,6 +144,7 @@ fn trace_tile_stream<R: Rng>(tile: &mut Tile<R>, scene: &Scene, samples: u32, ma
 
     generate_rays(
         camera,
+        viewport_size,
         &tile.region,
         samples,
         &mut tile.rng,
@@ -227,6 +235,7 @@ fn trace_tile_stream<R: Rng>(tile: &mut Tile<R>, scene: &Scene, samples: u32, ma
 
 fn trace_tile_immediate_shadow_rays<R: Rng>(
     tile: &mut Tile<R>,
+    viewport_size: (u32, u32),
     scene: &Scene,
     samples: u32,
     max_bounces: u8,
@@ -245,6 +254,7 @@ fn trace_tile_immediate_shadow_rays<R: Rng>(
 
     generate_rays(
         camera,
+        viewport_size,
         &tile.region,
         samples,
         &mut tile.rng,
@@ -366,11 +376,10 @@ fn main() {
 
     let image_width = 1920;
     let image_height = 1080;
-    let load_fn = match args.scene {
-        args::Scene::AsianDragon => Scene::load_asian_dragon,
-        args::Scene::SanMiguel => Scene::load_san_miguel,
-    };
-    let scene = load_fn(image_width, image_height);
+    let scene = Scene::load(match args.scene {
+        args::Scene::AsianDragon => &SCENE_ASIAN_DRAGON,
+        args::Scene::SanMiguel => &SCENE_SANMIGUEL,
+    });
 
     let mut rng = SmallRng::seed_from_u64(args.seed);
     let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
@@ -401,7 +410,13 @@ fn main() {
             TraceMode::StreamShadowImmediate => trace_tile_immediate_shadow_rays,
         };
 
-        trace_fn(tile, &scene, args.samples, args.max_bounces);
+        trace_fn(
+            tile,
+            (image_width, image_height),
+            &scene,
+            args.samples,
+            args.max_bounces,
+        );
     };
 
     if args.singlethread {

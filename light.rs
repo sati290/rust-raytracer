@@ -1,5 +1,6 @@
 use ultraviolet::Vec3;
 
+#[derive(Clone)]
 pub struct PointLight {
     pub pos: Vec3,
     pub intensity: Vec3,

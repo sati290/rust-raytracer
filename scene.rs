@@ -1,9 +1,16 @@
-use std::time::Instant;
+use std::{sync::LazyLock, time::Instant};
 
 use obj::Obj;
-use ultraviolet::Vec3;
+use ultraviolet::{Mat3, Vec3};
 
 use crate::{bvh::Bvh, camera::Camera, light::PointLight, triangle::Triangle};
+
+pub struct SceneDefinition {
+    obj_path: String,
+    transform: Mat3,
+    camera: Camera,
+    light: PointLight,
+}
 
 pub struct Scene {
     pub objects: Vec<Triangle>,
@@ -13,9 +20,9 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn load(obj_path: &str, camera: Camera, light: PointLight) -> Self {
+    pub fn load(def: &SceneDefinition) -> Self {
         let load_start = Instant::now();
-        let obj = Obj::load(obj_path).unwrap();
+        let obj = Obj::load(&def.obj_path).unwrap();
 
         let mut skipped_zero_area: u32 = 0;
         let mut objects = Vec::new();
@@ -26,9 +33,9 @@ impl Scene {
 
                     for i in 0..(p.0.len() - 2) {
                         let verts = [
-                            Vec3::from(obj.data.position[p.0[0].0]) * Vec3::new(1., 1., -1.),
-                            Vec3::from(obj.data.position[p.0[i + 1].0]) * Vec3::new(1., 1., -1.),
-                            Vec3::from(obj.data.position[p.0[i + 2].0]) * Vec3::new(1., 1., -1.),
+                            def.transform * Vec3::from(obj.data.position[p.0[0].0]),
+                            def.transform * Vec3::from(obj.data.position[p.0[i + 1].0]),
+                            def.transform * Vec3::from(obj.data.position[p.0[i + 2].0]),
                         ];
 
                         let v0v1 = verts[1] - verts[0];
@@ -51,7 +58,7 @@ impl Scene {
         let elapsed = load_start.elapsed();
         println!(
             "loaded {}, {} triangles in {:.2?}",
-            obj_path,
+            def.obj_path,
             objects.len(),
             elapsed
         );
@@ -66,42 +73,42 @@ impl Scene {
         Scene {
             objects,
             bvh,
-            camera,
-            light,
+            camera: def.camera.clone(),
+            light: def.light.clone(),
         }
     }
-
-    pub fn load_asian_dragon(image_width: u32, image_height: u32) -> Self {
-        let cam_pos = Vec3::new(0.6, 0.25, -1.).normalized() * 2500.;
-        let cam_target = Vec3::new(0., 350., 0.);
-        let light = PointLight::new(Vec3::new(5000., 5000., -10000.), Vec3::one(), 3e8);
-
-        let camera = Camera::new(
-            cam_pos,
-            cam_target,
-            Vec3::unit_y(),
-            60.,
-            image_width,
-            image_height,
-        );
-        Self::load("./scenes/asian_dragon_obj/asian_dragon.obj", camera, light)
-    }
-
-    pub fn load_san_miguel(image_width: u32, image_height: u32) -> Self {
-        let cam_pos = Vec3::new(28., 1.8, -1.65);
-        //let cam_pos = Vec3::new(17., 2., -1.8);
-        let cam_target = cam_pos + Vec3::new(-1., 0., 0.);
-        //let light = PointLight::new(Vec3::new(20., 3., -1.65), Vec3::one(), 10.);
-        let light = PointLight::new(Vec3::new(20., 3., -2.5), Vec3::one(), 20.);
-
-        let camera = Camera::new(
-            cam_pos,
-            cam_target,
-            Vec3::unit_y(),
-            60.,
-            image_width,
-            image_height,
-        );
-        Self::load("./scenes/San_Miguel/san-miguel.obj", camera, light)
-    }
 }
+
+pub static SCENE_ASIAN_DRAGON: LazyLock<SceneDefinition> = LazyLock::new(|| SceneDefinition {
+    obj_path: String::from("./scenes/asian_dragon_obj/asian_dragon.obj"),
+    transform: Mat3::new(
+        Vec3::new(1. / 1000., 0., 0.),
+        Vec3::new(0., 0., 1. / 1000.),
+        Vec3::new(0., 1. / 1000., 0.),
+    )
+    .transposed(),
+    camera: Camera::new(
+        Vec3::new(0.6, -1., 0.25).normalized() * 2.5,
+        Vec3::new(0., 0., 0.35),
+        Vec3::unit_z(),
+        60.,
+    ),
+    light: PointLight::new(Vec3::new(5., -10., 5.), Vec3::one(), 300.),
+});
+
+pub static SCENE_SANMIGUEL: LazyLock<SceneDefinition> = LazyLock::new(|| SceneDefinition {
+    obj_path: String::from("./scenes/San_Miguel/san-miguel.obj"),
+    transform: Mat3::new(
+        Vec3::new(1., 0., 0.),
+        Vec3::new(0., 0., -1.),
+        Vec3::new(0., 1., 0.),
+    )
+    .transposed(),
+    camera: Camera::new(
+        Vec3::new(28., -1.65, 1.8),
+        Vec3::new(27., -1.65, 1.8),
+        Vec3::unit_z(),
+        60.,
+    ),
+    light: PointLight::new(Vec3::new(20., -2.5, 3.), Vec3::one(), 20.),
+});

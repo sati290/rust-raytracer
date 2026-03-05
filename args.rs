@@ -14,7 +14,7 @@ pub enum Scene {
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    #[arg(value_enum, short = 's', long, default_value_t = Scene::AsianDragon)]
+    #[arg(value_enum, short = 's', long, default_value_t = Scene::SanMiguel)]
     pub scene: Scene,
 
     #[arg(short = 'n', long, default_value_t = 128)]
