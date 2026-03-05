@@ -32,10 +32,21 @@ use wide::{CmpGe, f32x4};
 
 const SHADOW_RAY_NEAR: f32 = 1e-5;
 
+#[derive(Clone)]
 pub struct PathInfo {
     weight: Vec3,
     destination_idx: u32,
     bounces: u8,
+}
+
+impl PathInfo {
+    pub fn diffuse(&self, weight: &Vec3) -> Self {
+        PathInfo {
+            weight: self.weight * *weight,
+            bounces: self.bounces + 1,
+            ..*self
+        }
+    }
 }
 
 fn linear_to_gamma(v: Vec3) -> Vec3 {
@@ -202,11 +213,7 @@ fn trace_tile_stream<R: Rng>(
                         sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
                     rays[new_rays_len] =
                         Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
-                    ray_infos[new_rays_len] = PathInfo {
-                        weight: path_info.weight * weight,
-                        destination_idx: path_info.destination_idx,
-                        bounces: path_info.bounces + 1,
-                    };
+                    ray_infos[new_rays_len] = path_info.diffuse(&weight);
                     new_rays_len += 1;
                 }
             }
@@ -300,17 +307,87 @@ fn trace_tile_immediate_shadow_rays<R: Rng>(
                         sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
                     rays[new_rays_len] =
                         Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
-                    ray_infos[new_rays_len] = PathInfo {
-                        weight: path_info.weight * weight,
-                        destination_idx: path_info.destination_idx,
-                        bounces: path_info.bounces + 1,
-                    };
+                    ray_infos[new_rays_len] = path_info.diffuse(&weight);
                     new_rays_len += 1;
                 }
             }
         }
         rays.truncate(new_rays_len);
         ray_infos.truncate(new_rays_len);
+    }
+}
+
+fn trace_stream_camera_only<R: Rng>(
+    tile: &mut Tile<R>,
+    viewport_size: (u32, u32),
+    scene: &Scene,
+    samples: u32,
+    max_bounces: u8,
+) {
+    let Scene {
+        objects,
+        bvh,
+        camera,
+        light,
+    } = scene;
+
+    let max_rays = (tile.region.width * tile.region.height * samples) as usize;
+    let mut rays = Vec::with_capacity(max_rays);
+    let mut ray_infos = Vec::with_capacity(max_rays);
+
+    generate_rays(
+        camera,
+        viewport_size,
+        &tile.region,
+        samples,
+        &mut tile.rng,
+        &mut rays,
+        &mut ray_infos,
+    );
+
+    for p in &mut tile.pixels {
+        p.w += samples as f32;
+    }
+
+    let mut hit_objects = vec![None; rays.len()];
+    bvh.intersect_stream(&mut rays, &mut hit_objects, &mut tile.trace_stats);
+
+    for ((camera_hit_obj_idx, camera_ray), camera_path_info) in hit_objects
+        .into_iter()
+        .zip(rays.into_iter())
+        .zip(ray_infos.into_iter())
+    {
+        let mut hit = camera_hit_obj_idx;
+        let mut ray = camera_ray;
+        let mut path_info = camera_path_info;
+
+        while let Some(hit_obj_idx) = hit {
+            let hit_obj = &objects[hit_obj_idx as usize];
+            let hit_pos = ray.hit_pos();
+            let dir_out = -ray.direction.xyz();
+
+            // Shadow ray
+            if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
+                sample_light(&dir_out, &hit_obj.normal, &hit_pos, light)
+                && shadow_weight != Vec3::zero()
+            {
+                let shadow_ray = Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
+                if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
+                    *tile.pixels[path_info.destination_idx as usize] +=
+                        Vec4::from(path_info.weight * shadow_weight);
+                }
+            }
+
+            // Diffuse ray
+            if path_info.bounces >= max_bounces {
+                break;
+            }
+
+            let (dir_in, weight) = sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
+            ray = Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
+            hit = scene.bvh.intersect1(&mut ray, &mut tile.trace_stats);
+            path_info = path_info.diffuse(&weight);
+        }
     }
 }
 
@@ -408,6 +485,7 @@ fn main() {
         let trace_fn = match args.mode {
             TraceMode::Stream => trace_tile_stream,
             TraceMode::StreamShadowImmediate => trace_tile_immediate_shadow_rays,
+            TraceMode::StreamCameraOnly => trace_stream_camera_only,
         };
 
         trace_fn(

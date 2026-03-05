@@ -1,5 +1,6 @@
 use ultraviolet::{Vec3, Vec4};
 
+#[derive(Clone)]
 #[repr(C, align(16))]
 pub struct Ray {
     pub origin_far: Vec4,           // x, y, z, near

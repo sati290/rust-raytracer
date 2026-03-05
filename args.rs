@@ -4,6 +4,7 @@ use clap::{Parser, ValueEnum};
 pub enum TraceMode {
     Stream,
     StreamShadowImmediate,
+    StreamCameraOnly,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
