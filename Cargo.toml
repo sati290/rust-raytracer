@@ -6,7 +6,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 rayon = "1.5"
 ultraviolet = "0.10"
 wide = "0.7"
