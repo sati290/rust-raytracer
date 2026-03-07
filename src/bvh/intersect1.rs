@@ -3,6 +3,7 @@ use arrayvec::ArrayVec;
 use crate::{bvh::*, ray::Ray, trace_stats::TraceStats};
 
 impl Bvh {
+    #[must_use]
     pub fn occluded1(&self, ray: &Ray, stats: &mut TraceStats) -> bool {
         use safe_arch::*;
 
@@ -104,6 +105,7 @@ impl Bvh {
         false
     }
 
+    #[must_use]
     pub fn intersect1(&self, ray: &mut Ray, stats: &mut TraceStats) -> Option<u32> {
         use safe_arch::*;
 

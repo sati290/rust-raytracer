@@ -3,12 +3,7 @@ use std::f32::consts::PI;
 use rand::Rng;
 use ultraviolet::{Rotor3, Vec3};
 
-use crate::{
-    brdf::Brdf,
-    camera::{Camera, CameraRayGenerator, Rect},
-    light::PointLight,
-    ray::Ray,
-};
+use crate::{brdf::Brdf, light::PointLight};
 
 pub const SHADOW_RAY_NEAR: f32 = 1e-5;
 
@@ -29,43 +24,7 @@ impl PathInfo {
     }
 }
 
-pub fn generate_rays<R: Rng>(
-    camera: &Camera,
-    viewport_size: (u32, u32),
-    region: &Rect,
-    samples: u32,
-    rng: &mut R,
-    rays: &mut Vec<Ray>,
-    path_infos: &mut Vec<PathInfo>,
-) {
-    let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
-    while !generator.is_done() {
-        for _ in 0..samples / 8 {
-            let dirs: [Vec3; 8] = generator.sample8(rng).into();
-            for d in dirs {
-                rays.push(Ray::new(&camera.position(), &d, 0., f32::INFINITY));
-                path_infos.push(PathInfo {
-                    weight: Vec3::one(),
-                    destination_idx: generator.current_pixel_idx(),
-                    bounces: 0,
-                });
-            }
-        }
-
-        for _ in 0..samples % 8 {
-            let dir = generator.sample(rng);
-            rays.push(Ray::new(&camera.position(), &dir, 0., f32::INFINITY));
-            path_infos.push(PathInfo {
-                weight: Vec3::one(),
-                destination_idx: generator.current_pixel_idx(),
-                bounces: 0,
-            });
-        }
-
-        generator.next_pixel();
-    }
-}
-
+#[must_use]
 pub fn sample_light(
     dir_out: &Vec3,
     normal: &Vec3,
@@ -87,6 +46,7 @@ pub fn sample_light(
     Some((dir_in, light_dist, weight))
 }
 
+#[must_use]
 pub fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) -> (Vec3, Vec3) {
     let world_to_local = if *normal == -Vec3::unit_z() {
         Rotor3::from_rotation_xz(PI)

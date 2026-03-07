@@ -1,7 +1,50 @@
 use rand::Rng;
 use ultraviolet::{Vec3, Vec4};
 
-use crate::{Tile, integrators::common::*, ray::Ray, scene::Scene};
+use crate::{
+    Tile,
+    camera::{Camera, CameraRayGenerator, Rect},
+    integrators::common::*,
+    ray::Ray,
+    scene::Scene,
+};
+
+pub fn generate_rays<R: Rng>(
+    camera: &Camera,
+    viewport_size: (u32, u32),
+    region: &Rect,
+    samples: u32,
+    rng: &mut R,
+    rays: &mut Vec<Ray>,
+    path_infos: &mut Vec<PathInfo>,
+) {
+    let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
+    while !generator.is_done() {
+        for _ in 0..samples / 8 {
+            let dirs: [Vec3; 8] = generator.sample8(rng).into();
+            for d in dirs {
+                rays.push(Ray::new(&camera.position(), &d, 0., f32::INFINITY));
+                path_infos.push(PathInfo {
+                    weight: Vec3::one(),
+                    destination_idx: generator.current_pixel_idx(),
+                    bounces: 0,
+                });
+            }
+        }
+
+        for _ in 0..samples % 8 {
+            let dir = generator.sample(rng);
+            rays.push(Ray::new(&camera.position(), &dir, 0., f32::INFINITY));
+            path_infos.push(PathInfo {
+                weight: Vec3::one(),
+                destination_idx: generator.current_pixel_idx(),
+                bounces: 0,
+            });
+        }
+
+        generator.next_pixel();
+    }
+}
 
 pub fn integrate_tile_stream<R: Rng>(
     tile: &mut Tile<R>,

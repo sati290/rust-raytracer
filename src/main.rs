@@ -14,6 +14,7 @@ mod triangle_opt;
 use crate::args::{Args, TraceMode};
 use crate::camera::Rect;
 use crate::integrators::integrate_stream::*;
+use crate::integrators::integrate1::integrate_tile1;
 use crate::scene::load_scene;
 use crate::trace_stats::TraceStats;
 use chrono::Local;
@@ -129,6 +130,7 @@ fn main() {
             TraceMode::Stream => integrate_tile_stream,
             TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
+            TraceMode::Standard1 => integrate_tile1,
         };
 
         trace_fn(

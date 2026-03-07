@@ -5,6 +5,7 @@ pub enum TraceMode {
     Stream,
     StreamShadowImmediate,
     StreamCameraOnly,
+    Standard1,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
