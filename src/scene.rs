@@ -1,9 +1,10 @@
-use std::{sync::LazyLock, time::Instant};
+use std::time::Instant;
 
 use obj::Obj;
 use ultraviolet::{Mat3, Vec2, Vec3};
 
 use crate::{
+    args,
     bvh::Bvh,
     camera::Camera,
     light::PointLight,
@@ -89,36 +90,41 @@ impl Scene {
     }
 }
 
-pub static SCENE_ASIAN_DRAGON: LazyLock<SceneDefinition> = LazyLock::new(|| SceneDefinition {
-    obj_path: String::from("./scenes/asian_dragon_obj/asian_dragon.obj"),
-    transform: Mat3::new(
-        Vec3::new(1. / 1000., 0., 0.),
-        Vec3::new(0., 0., 1. / 1000.),
-        Vec3::new(0., 1. / 1000., 0.),
-    )
-    .transposed(),
-    camera: Camera::new(
-        Vec3::new(0.6, -1., 0.25).normalized() * 2.5,
-        Vec3::new(0., 0., 0.35),
-        Vec3::unit_z(),
-        60.,
-    ),
-    light: PointLight::new(Vec3::new(5., -10., 5.), Vec3::one(), 300.),
-});
+pub fn load_scene(scene: args::Scene) -> Scene {
+    let definition = match scene {
+        args::Scene::AsianDragon => SceneDefinition {
+            obj_path: String::from("./scenes/asian_dragon_obj/asian_dragon.obj"),
+            transform: Mat3::new(
+                Vec3::new(1. / 1000., 0., 0.),
+                Vec3::new(0., 0., 1. / 1000.),
+                Vec3::new(0., 1. / 1000., 0.),
+            )
+            .transposed(),
+            camera: Camera::new(
+                Vec3::new(0.6, -1., 0.25).normalized() * 2.5,
+                Vec3::new(0., 0., 0.35),
+                Vec3::unit_z(),
+                60.,
+            ),
+            light: PointLight::new(Vec3::new(5., -10., 5.), Vec3::one(), 300.),
+        },
+        args::Scene::SanMiguel => SceneDefinition {
+            obj_path: String::from("./scenes/San_Miguel/san-miguel.obj"),
+            transform: Mat3::new(
+                Vec3::new(1., 0., 0.),
+                Vec3::new(0., 0., -1.),
+                Vec3::new(0., 1., 0.),
+            )
+            .transposed(),
+            camera: Camera::new(
+                Vec3::new(28., -1.65, 1.8),
+                Vec3::new(27., -1.65, 1.8),
+                Vec3::unit_z(),
+                60.,
+            ),
+            light: PointLight::new(Vec3::new(20., -2.5, 3.), Vec3::one(), 20.),
+        },
+    };
 
-pub static SCENE_SANMIGUEL: LazyLock<SceneDefinition> = LazyLock::new(|| SceneDefinition {
-    obj_path: String::from("./scenes/San_Miguel/san-miguel.obj"),
-    transform: Mat3::new(
-        Vec3::new(1., 0., 0.),
-        Vec3::new(0., 0., -1.),
-        Vec3::new(0., 1., 0.),
-    )
-    .transposed(),
-    camera: Camera::new(
-        Vec3::new(28., -1.65, 1.8),
-        Vec3::new(27., -1.65, 1.8),
-        Vec3::unit_z(),
-        60.,
-    ),
-    light: PointLight::new(Vec3::new(20., -2.5, 3.), Vec3::one(), 20.),
-});
+    Scene::load(&definition)
+}

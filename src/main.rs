@@ -14,7 +14,7 @@ mod triangle_opt;
 use crate::args::{Args, TraceMode};
 use crate::camera::Rect;
 use crate::integrators::integrate_stream::*;
-use crate::scene::{SCENE_ASIAN_DRAGON, SCENE_SANMIGUEL, Scene};
+use crate::scene::load_scene;
 use crate::trace_stats::TraceStats;
 use chrono::Local;
 use clap::Parser as _;
@@ -99,10 +99,7 @@ fn main() {
 
     let image_width = 1920;
     let image_height = 1080;
-    let scene = Scene::load(match args.scene {
-        args::Scene::AsianDragon => &SCENE_ASIAN_DRAGON,
-        args::Scene::SanMiguel => &SCENE_SANMIGUEL,
-    });
+    let scene = load_scene(args.scene);
 
     let mut rng = SmallRng::seed_from_u64(args.seed);
     let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
