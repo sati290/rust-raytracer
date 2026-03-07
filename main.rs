@@ -3,6 +3,7 @@ mod args;
 mod brdf;
 mod bvh;
 mod camera;
+mod integrators;
 mod light;
 mod mesh;
 mod ray;
@@ -11,10 +12,8 @@ mod trace_stats;
 mod triangle_opt;
 
 use crate::args::{Args, TraceMode};
-use crate::brdf::Brdf;
-use crate::camera::{Camera, CameraRayGenerator, Rect};
-use crate::light::PointLight;
-use crate::ray::Ray;
+use crate::camera::Rect;
+use crate::integrators::integrate_stream::*;
 use crate::scene::{SCENE_ASIAN_DRAGON, SCENE_SANMIGUEL, Scene};
 use crate::trace_stats::TraceStats;
 use chrono::Local;
@@ -24,30 +23,10 @@ use image::RgbImage;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
-use std::f32::consts::PI;
 use std::fs;
 use std::time::Instant;
-use ultraviolet::{Rotor3, Vec3, Vec3x4, Vec4};
+use ultraviolet::{Vec3, Vec3x4, Vec4};
 use wide::{CmpGe, f32x4};
-
-const SHADOW_RAY_NEAR: f32 = 1e-5;
-
-#[derive(Clone)]
-pub struct PathInfo {
-    weight: Vec3,
-    destination_idx: u32,
-    bounces: u8,
-}
-
-impl PathInfo {
-    pub fn diffuse(&self, weight: &Vec3) -> Self {
-        PathInfo {
-            weight: self.weight * *weight,
-            bounces: self.bounces + 1,
-            ..*self
-        }
-    }
-}
 
 fn linear_to_gamma(v: Vec3) -> Vec3 {
     v.map(|f| f.sqrt())
@@ -56,340 +35,6 @@ fn linear_to_gamma(v: Vec3) -> Vec3 {
 fn color_vec_to_rgb_norm_gamma(v: Vec4) -> image::Rgb<u8> {
     let v = linear_to_gamma(v.xyz() / v.w) * 255.;
     image::Rgb([v.x as u8, v.y as u8, v.z as u8])
-}
-
-fn generate_rays<R: Rng>(
-    camera: &Camera,
-    viewport_size: (u32, u32),
-    region: &Rect,
-    samples: u32,
-    rng: &mut R,
-    rays: &mut Vec<Ray>,
-    path_infos: &mut Vec<PathInfo>,
-) {
-    let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
-    while !generator.is_done() {
-        for _ in 0..samples / 8 {
-            let dirs: [Vec3; 8] = generator.sample8(rng).into();
-            for d in dirs {
-                rays.push(Ray::new(&camera.position(), &d, 0., f32::INFINITY));
-                path_infos.push(PathInfo {
-                    weight: Vec3::one(),
-                    destination_idx: generator.current_pixel_idx(),
-                    bounces: 0,
-                });
-            }
-        }
-
-        for _ in 0..samples % 8 {
-            let dir = generator.sample(rng);
-            rays.push(Ray::new(&camera.position(), &dir, 0., f32::INFINITY));
-            path_infos.push(PathInfo {
-                weight: Vec3::one(),
-                destination_idx: generator.current_pixel_idx(),
-                bounces: 0,
-            });
-        }
-
-        generator.next_pixel();
-    }
-}
-
-fn sample_light(
-    dir_out: &Vec3,
-    normal: &Vec3,
-    hit_pos: &Vec3,
-    light: &PointLight,
-) -> Option<(Vec3, f32, Vec3)> {
-    let light_vec = light.pos - *hit_pos;
-    let ndotl = normal.dot(light_vec);
-    if ndotl * normal.dot(*dir_out) < 0. {
-        return None;
-    }
-
-    let light_dist_sq = light_vec.mag_sq();
-    let light_dist = light_dist_sq.sqrt();
-    let dir_in = light_vec / light_dist;
-    let ndotl = (ndotl / light_dist).abs();
-    let weight = Brdf::eval() * ndotl * light.intensity / light_dist_sq;
-
-    Some((dir_in, light_dist, weight))
-}
-
-fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) -> (Vec3, Vec3) {
-    let world_to_local = if *normal == -Vec3::unit_z() {
-        Rotor3::from_rotation_xz(PI)
-    } else {
-        Rotor3::from_rotation_between(*normal, Vec3::unit_z())
-    };
-    let local_to_world = world_to_local.reversed();
-    let dir_out_local = world_to_local * *dir_out;
-
-    let (dir_in_local, pdf, brdf) = Brdf::sample_eval(&dir_out_local, rng);
-    let dir_in = local_to_world * dir_in_local;
-    let ndotl = normal.dot(dir_in).abs();
-    let weight = brdf * ndotl / pdf;
-
-    debug_assert!(dir_in.as_array().iter().all(|f| f.is_normal()));
-    (dir_in, weight)
-}
-
-fn trace_tile_stream<R: Rng>(
-    tile: &mut Tile<R>,
-    viewport_size: (u32, u32),
-    scene: &Scene,
-    samples: u32,
-    max_bounces: u8,
-) {
-    let Scene {
-        mesh,
-        bvh,
-        camera,
-        light,
-    } = scene;
-
-    let max_rays = (tile.region.width * tile.region.height * samples) as usize;
-    let mut rays = Vec::with_capacity(max_rays);
-    let mut ray_infos = Vec::with_capacity(max_rays);
-    let mut hit_objects = Vec::with_capacity(max_rays);
-
-    generate_rays(
-        camera,
-        viewport_size,
-        &tile.region,
-        samples,
-        &mut tile.rng,
-        &mut rays,
-        &mut ray_infos,
-    );
-
-    for p in &mut tile.pixels {
-        p.w += samples as f32;
-    }
-
-    let max_shadow_rays = max_rays;
-    let mut shadow_rays = Vec::with_capacity(max_shadow_rays);
-    let mut shadow_ray_infos = Vec::with_capacity(max_shadow_rays);
-    let mut shadow_rays_occluded = Vec::with_capacity(max_shadow_rays);
-
-    while !rays.is_empty() {
-        hit_objects.clear();
-        hit_objects.resize(rays.len(), None);
-
-        bvh.intersect_stream(&mut rays, &mut hit_objects, &mut tile.trace_stats);
-
-        shadow_rays.clear();
-        shadow_ray_infos.clear();
-
-        let mut new_rays_len = 0;
-        for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
-            if let &Some(hit_obj_idx) = hit_obj_idx {
-                let ray = &rays[i];
-                let path_info = &ray_infos[i];
-                let hit_obj = mesh.get_triangle(hit_obj_idx);
-                let hit_pos = ray.hit_pos();
-                let dir_out = -ray.direction.xyz();
-                let normal = hit_obj.normal();
-
-                // Shadow ray
-                if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                    sample_light(&dir_out, normal, &hit_pos, light)
-                    && shadow_weight != Vec3::zero()
-                {
-                    shadow_rays.push(Ray::new(
-                        &hit_pos,
-                        &shadow_ray_dir,
-                        SHADOW_RAY_NEAR,
-                        shadow_far,
-                    ));
-                    shadow_ray_infos.push(PathInfo {
-                        weight: path_info.weight * shadow_weight,
-                        ..*path_info
-                    });
-                }
-
-                // Diffuse ray
-                if path_info.bounces < max_bounces {
-                    let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
-                    rays[new_rays_len] =
-                        Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
-                    ray_infos[new_rays_len] = path_info.diffuse(&weight);
-                    new_rays_len += 1;
-                }
-            }
-        }
-        rays.truncate(new_rays_len);
-        ray_infos.truncate(new_rays_len);
-
-        if !shadow_rays.is_empty() {
-            shadow_rays_occluded.clear();
-            shadow_rays_occluded.resize(shadow_rays.len(), false);
-            bvh.occluded_stream(
-                &mut shadow_rays,
-                &mut shadow_rays_occluded,
-                &mut tile.trace_stats,
-            );
-
-            for (occluded, path_info) in shadow_rays_occluded.iter().zip(shadow_ray_infos.iter()) {
-                if !occluded {
-                    *tile.pixels[path_info.destination_idx as usize] +=
-                        Vec4::from(path_info.weight);
-                }
-            }
-        }
-    }
-}
-
-fn trace_tile_immediate_shadow_rays<R: Rng>(
-    tile: &mut Tile<R>,
-    viewport_size: (u32, u32),
-    scene: &Scene,
-    samples: u32,
-    max_bounces: u8,
-) {
-    let Scene {
-        mesh,
-        bvh,
-        camera,
-        light,
-    } = scene;
-
-    let max_rays = (tile.region.width * tile.region.height * samples) as usize;
-    let mut rays = Vec::with_capacity(max_rays);
-    let mut ray_infos = Vec::with_capacity(max_rays);
-    let mut hit_objects = Vec::with_capacity(max_rays);
-
-    generate_rays(
-        camera,
-        viewport_size,
-        &tile.region,
-        samples,
-        &mut tile.rng,
-        &mut rays,
-        &mut ray_infos,
-    );
-
-    for p in &mut tile.pixels {
-        p.w += samples as f32;
-    }
-
-    while !rays.is_empty() {
-        hit_objects.clear();
-        hit_objects.resize(rays.len(), None);
-
-        bvh.intersect_stream(&mut rays, &mut hit_objects, &mut tile.trace_stats);
-
-        let mut new_rays_len = 0;
-        for (i, hit_obj_idx) in hit_objects.iter().enumerate() {
-            if let &Some(hit_obj_idx) = hit_obj_idx {
-                let ray = &rays[i];
-                let path_info = &ray_infos[i];
-                let hit_obj = mesh.get_triangle(hit_obj_idx);
-                let hit_pos = ray.hit_pos();
-                let dir_out = -ray.direction.xyz();
-                let normal = hit_obj.normal();
-
-                // Shadow ray
-                if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                    sample_light(&dir_out, normal, &hit_pos, light)
-                    && shadow_weight != Vec3::zero()
-                {
-                    let shadow_ray =
-                        Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
-                    if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
-                        *tile.pixels[path_info.destination_idx as usize] +=
-                            Vec4::from(path_info.weight * shadow_weight);
-                    }
-                }
-
-                // Diffuse ray
-                if path_info.bounces < max_bounces {
-                    let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
-                    rays[new_rays_len] =
-                        Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
-                    ray_infos[new_rays_len] = path_info.diffuse(&weight);
-                    new_rays_len += 1;
-                }
-            }
-        }
-        rays.truncate(new_rays_len);
-        ray_infos.truncate(new_rays_len);
-    }
-}
-
-fn trace_stream_camera_only<R: Rng>(
-    tile: &mut Tile<R>,
-    viewport_size: (u32, u32),
-    scene: &Scene,
-    samples: u32,
-    max_bounces: u8,
-) {
-    let Scene {
-        mesh,
-        bvh,
-        camera,
-        light,
-    } = scene;
-
-    let max_rays = (tile.region.width * tile.region.height * samples) as usize;
-    let mut rays = Vec::with_capacity(max_rays);
-    let mut ray_infos = Vec::with_capacity(max_rays);
-
-    generate_rays(
-        camera,
-        viewport_size,
-        &tile.region,
-        samples,
-        &mut tile.rng,
-        &mut rays,
-        &mut ray_infos,
-    );
-
-    for p in &mut tile.pixels {
-        p.w += samples as f32;
-    }
-
-    let mut hit_objects = vec![None; rays.len()];
-    bvh.intersect_stream(&mut rays, &mut hit_objects, &mut tile.trace_stats);
-
-    for ((camera_hit_obj_idx, camera_ray), camera_path_info) in hit_objects
-        .into_iter()
-        .zip(rays.into_iter())
-        .zip(ray_infos.into_iter())
-    {
-        let mut hit = camera_hit_obj_idx;
-        let mut ray = camera_ray;
-        let mut path_info = camera_path_info;
-
-        while let Some(hit_obj_idx) = hit {
-            let hit_obj = mesh.get_triangle(hit_obj_idx);
-            let hit_pos = ray.hit_pos();
-            let dir_out = -ray.direction.xyz();
-            let normal = hit_obj.normal();
-
-            // Shadow ray
-            if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                sample_light(&dir_out, normal, &hit_pos, light)
-                && shadow_weight != Vec3::zero()
-            {
-                let shadow_ray = Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
-                if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
-                    *tile.pixels[path_info.destination_idx as usize] +=
-                        Vec4::from(path_info.weight * shadow_weight);
-                }
-            }
-
-            // Diffuse ray
-            if path_info.bounces >= max_bounces {
-                break;
-            }
-
-            let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
-            ray = Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
-            hit = scene.bvh.intersect1(&mut ray, &mut tile.trace_stats);
-            path_info = path_info.diffuse(&weight);
-        }
-    }
 }
 
 struct Tile<'a, R: Rng> {
@@ -484,9 +129,9 @@ fn main() {
     let time_start = Instant::now();
     let trace_fn = |tile| {
         let trace_fn = match args.mode {
-            TraceMode::Stream => trace_tile_stream,
-            TraceMode::StreamShadowImmediate => trace_tile_immediate_shadow_rays,
-            TraceMode::StreamCameraOnly => trace_stream_camera_only,
+            TraceMode::Stream => integrate_tile_stream,
+            TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
+            TraceMode::StreamCameraOnly => integrate_stream_camera_only,
         };
 
         trace_fn(

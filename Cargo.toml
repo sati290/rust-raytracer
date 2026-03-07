@@ -31,6 +31,11 @@ path = "main.rs"
 [profile.release]
 debug = 1
 
+[profile.release-lto]
+inherits = "release"
+lto = true
+codegen-units = 1
+
 [profile.dev-opt]
 inherits = "dev"
 opt-level = 1
