@@ -4,10 +4,10 @@ mod brdf;
 mod bvh;
 mod camera;
 mod light;
+mod mesh;
 mod ray;
 mod scene;
 mod trace_stats;
-mod triangle;
 mod triangle_opt;
 
 use crate::args::{Args, TraceMode};
@@ -142,7 +142,7 @@ fn trace_tile_stream<R: Rng>(
     max_bounces: u8,
 ) {
     let Scene {
-        objects,
+        mesh,
         bvh,
         camera,
         light,
@@ -186,13 +186,14 @@ fn trace_tile_stream<R: Rng>(
             if let &Some(hit_obj_idx) = hit_obj_idx {
                 let ray = &rays[i];
                 let path_info = &ray_infos[i];
-                let hit_obj = &objects[hit_obj_idx as usize];
+                let hit_obj = mesh.get_triangle(hit_obj_idx);
                 let hit_pos = ray.hit_pos();
                 let dir_out = -ray.direction.xyz();
+                let normal = hit_obj.normal();
 
                 // Shadow ray
                 if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                    sample_light(&dir_out, &hit_obj.normal, &hit_pos, light)
+                    sample_light(&dir_out, normal, &hit_pos, light)
                     && shadow_weight != Vec3::zero()
                 {
                     shadow_rays.push(Ray::new(
@@ -209,8 +210,7 @@ fn trace_tile_stream<R: Rng>(
 
                 // Diffuse ray
                 if path_info.bounces < max_bounces {
-                    let (dir_in, weight) =
-                        sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
+                    let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
                     rays[new_rays_len] =
                         Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
                     ray_infos[new_rays_len] = path_info.diffuse(&weight);
@@ -248,7 +248,7 @@ fn trace_tile_immediate_shadow_rays<R: Rng>(
     max_bounces: u8,
 ) {
     let Scene {
-        objects,
+        mesh,
         bvh,
         camera,
         light,
@@ -284,13 +284,14 @@ fn trace_tile_immediate_shadow_rays<R: Rng>(
             if let &Some(hit_obj_idx) = hit_obj_idx {
                 let ray = &rays[i];
                 let path_info = &ray_infos[i];
-                let hit_obj = &objects[hit_obj_idx as usize];
+                let hit_obj = mesh.get_triangle(hit_obj_idx);
                 let hit_pos = ray.hit_pos();
                 let dir_out = -ray.direction.xyz();
+                let normal = hit_obj.normal();
 
                 // Shadow ray
                 if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                    sample_light(&dir_out, &hit_obj.normal, &hit_pos, light)
+                    sample_light(&dir_out, normal, &hit_pos, light)
                     && shadow_weight != Vec3::zero()
                 {
                     let shadow_ray =
@@ -303,8 +304,7 @@ fn trace_tile_immediate_shadow_rays<R: Rng>(
 
                 // Diffuse ray
                 if path_info.bounces < max_bounces {
-                    let (dir_in, weight) =
-                        sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
+                    let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
                     rays[new_rays_len] =
                         Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
                     ray_infos[new_rays_len] = path_info.diffuse(&weight);
@@ -325,7 +325,7 @@ fn trace_stream_camera_only<R: Rng>(
     max_bounces: u8,
 ) {
     let Scene {
-        objects,
+        mesh,
         bvh,
         camera,
         light,
@@ -362,13 +362,14 @@ fn trace_stream_camera_only<R: Rng>(
         let mut path_info = camera_path_info;
 
         while let Some(hit_obj_idx) = hit {
-            let hit_obj = &objects[hit_obj_idx as usize];
+            let hit_obj = mesh.get_triangle(hit_obj_idx);
             let hit_pos = ray.hit_pos();
             let dir_out = -ray.direction.xyz();
+            let normal = hit_obj.normal();
 
             // Shadow ray
             if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
-                sample_light(&dir_out, &hit_obj.normal, &hit_pos, light)
+                sample_light(&dir_out, normal, &hit_pos, light)
                 && shadow_weight != Vec3::zero()
             {
                 let shadow_ray = Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
@@ -383,7 +384,7 @@ fn trace_stream_camera_only<R: Rng>(
                 break;
             }
 
-            let (dir_in, weight) = sample_diffuse_ray(&dir_out, &hit_obj.normal, &mut tile.rng);
+            let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
             ray = Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
             hit = scene.bvh.intersect1(&mut ray, &mut tile.trace_stats);
             path_info = path_info.diffuse(&weight);

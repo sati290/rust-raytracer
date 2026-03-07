@@ -4,8 +4,8 @@ use ultraviolet::{Vec3, Vec3x4};
 
 use crate::Ray;
 use crate::aabb::Aabb;
+use crate::mesh::TriangleMesh;
 use crate::trace_stats::TraceStats;
-use crate::triangle::Triangle;
 use crate::triangle_opt::TriangleOpt;
 
 type RayIdx = u32;
@@ -68,9 +68,9 @@ pub struct Bvh {
 }
 
 impl Bvh {
-    pub fn build(objects: &[Triangle]) -> Bvh {
-        let mut object_indices: Vec<_> = (0..objects.len()).collect();
-        let object_bounds: Vec<_> = objects.iter().map(|o| (o.centroid(), o.aabb())).collect();
+    pub fn build(mesh: &TriangleMesh) -> Bvh {
+        let mut object_indices: Vec<_> = (0..mesh.num_triangles()).collect();
+        let object_bounds: Vec<_> = mesh.iter().map(|t| (t.centroid(), t.aabb())).collect();
 
         let mut stats = BvhStats::new();
         let root_node = Bvh::build_recursive(&mut object_indices, 0, &object_bounds, 0, &mut stats);
@@ -78,7 +78,7 @@ impl Bvh {
 
         let triangles = object_indices
             .iter()
-            .map(|&idx| TriangleOpt::from(&objects[idx]))
+            .map(|&index| TriangleOpt::from(&mesh.get_triangle(index as u32)))
             .collect();
 
         Bvh {
@@ -110,8 +110,8 @@ impl Bvh {
                 let mut centroid_bounds = Aabb::empty();
                 for idx in &*indices {
                     let (centroid, aabb) = &object_bounds[*idx];
-                    bounds.join_mut(*aabb);
-                    centroid_bounds.grow_mut(*centroid);
+                    bounds.join_mut(aabb);
+                    centroid_bounds.grow_mut(centroid);
                 }
 
                 let size = centroid_bounds.size();
@@ -147,7 +147,7 @@ impl Bvh {
                     let bucket_idx = get_bucket_idx(centroid);
                     let bucket = &mut buckets[bucket_idx];
 
-                    bucket.0.join_mut(*aabb);
+                    bucket.0.join_mut(aabb);
                     bucket.1 += 1;
                 }
 
@@ -158,10 +158,10 @@ impl Bvh {
                 for i in 0..(BUCKET_COUNT - 1) {
                     let (buckets_l, buckets_r) = buckets.split_at(i + 1);
                     let child_l = buckets_l.iter().fold((Aabb::empty(), 0u32), |acc, x| {
-                        (acc.0.join(x.0), acc.1 + x.1)
+                        (acc.0.join(&x.0), acc.1 + x.1)
                     });
                     let child_r = buckets_r.iter().fold((Aabb::empty(), 0u32), |acc, x| {
-                        (acc.0.join(x.0), acc.1 + x.1)
+                        (acc.0.join(&x.0), acc.1 + x.1)
                     });
 
                     let cost = (child_l.0.surface_area() * child_l.1 as f32

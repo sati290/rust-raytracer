@@ -1,9 +1,14 @@
 use std::{sync::LazyLock, time::Instant};
 
 use obj::Obj;
-use ultraviolet::{Mat3, Vec3};
+use ultraviolet::{Mat3, Vec2, Vec3};
 
-use crate::{bvh::Bvh, camera::Camera, light::PointLight, triangle::Triangle};
+use crate::{
+    bvh::Bvh,
+    camera::Camera,
+    light::PointLight,
+    mesh::{TriangleMesh, TriangleMeshBuilder},
+};
 
 pub struct SceneDefinition {
     obj_path: String,
@@ -13,7 +18,7 @@ pub struct SceneDefinition {
 }
 
 pub struct Scene {
-    pub objects: Vec<Triangle>,
+    pub mesh: TriangleMesh,
     pub bvh: Bvh,
     pub camera: Camera,
     pub light: PointLight,
@@ -25,41 +30,46 @@ impl Scene {
         let obj = Obj::load(&def.obj_path).unwrap();
 
         let mut skipped_zero_area: u32 = 0;
-        let mut objects = Vec::new();
+        let mut builder = TriangleMeshBuilder::new();
+        builder.reserve_vertices(obj.data.position.len());
+
         for o in &obj.data.objects {
             for g in &o.groups {
+                builder.reserve_triangles(g.polys.len());
                 for p in &g.polys {
                     assert!(p.0.len() >= 3);
 
                     for i in 0..(p.0.len() - 2) {
-                        let verts = [
-                            def.transform * Vec3::from(obj.data.position[p.0[0].0]),
-                            def.transform * Vec3::from(obj.data.position[p.0[i + 1].0]),
-                            def.transform * Vec3::from(obj.data.position[p.0[i + 2].0]),
-                        ];
+                        let indices = [0, i + 1, i + 2];
+                        let positions = indices
+                            .map(|i| def.transform * Vec3::from(obj.data.position[p.0[i].0]));
+                        let texcoords =
+                            indices.map(|i| Vec2::from(obj.data.texture[p.0[i].1.unwrap()]));
+                        let normals = indices.map(|i| {
+                            def.transform * Vec3::from(obj.data.normal[p.0[i].2.unwrap()])
+                        });
 
-                        let v0v1 = verts[1] - verts[0];
-                        let v0v2 = verts[2] - verts[0];
-                        let normal = v0v2.cross(v0v1).normalized();
-
+                        let v0v1 = positions[1] - positions[0];
+                        let v0v2 = positions[2] - positions[0];
                         let magsq = v0v1.cross(v0v2).mag_sq();
                         if magsq == 0. {
                             skipped_zero_area += 1;
                             continue;
                         }
 
-                        let tri = Triangle::new(verts, normal);
-                        objects.push(tri);
+                        builder.add_triangle(&positions, &texcoords, &normals);
                     }
                 }
             }
         }
 
+        let mesh = builder.build();
+
         let elapsed = load_start.elapsed();
         println!(
             "loaded {}, {} triangles in {:.2?}",
             def.obj_path,
-            objects.len(),
+            mesh.num_triangles(),
             elapsed
         );
         if skipped_zero_area > 0 {
@@ -67,11 +77,11 @@ impl Scene {
         }
 
         let bvh_start = Instant::now();
-        let bvh = Bvh::build(&objects);
+        let bvh = Bvh::build(&mesh);
         println!("bvh build {:.2?}", bvh_start.elapsed());
 
         Scene {
-            objects,
+            mesh,
             bvh,
             camera: def.camera.clone(),
             light: def.light.clone(),

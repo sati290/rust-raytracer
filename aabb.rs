@@ -36,27 +36,27 @@ impl Aabb {
     }
 
     #[must_use]
-    pub fn _grow(&self, point: Vec3) -> Aabb {
+    pub fn _grow(&self, point: &Vec3) -> Aabb {
         Aabb {
-            min: self.min.min_by_component(point),
-            max: self.max.max_by_component(point),
+            min: self.min.min_by_component(*point),
+            max: self.max.max_by_component(*point),
         }
     }
 
-    pub fn grow_mut(&mut self, point: Vec3) {
-        self.min = self.min.min_by_component(point);
-        self.max = self.max.max_by_component(point);
+    pub fn grow_mut(&mut self, point: &Vec3) {
+        self.min = self.min.min_by_component(*point);
+        self.max = self.max.max_by_component(*point);
     }
 
     #[must_use]
-    pub fn join(&self, other: Aabb) -> Aabb {
+    pub fn join(&self, other: &Aabb) -> Aabb {
         Aabb {
             min: self.min.min_by_component(other.min),
             max: self.max.max_by_component(other.max),
         }
     }
 
-    pub fn join_mut(&mut self, other: Aabb) {
+    pub fn join_mut(&mut self, other: &Aabb) {
         self.min = self.min.min_by_component(other.min);
         self.max = self.max.max_by_component(other.max);
     }

@@ -1,7 +1,7 @@
 use ultraviolet::{Vec3, Vec3x4};
 use wide::{CmpGe, CmpLe, f32x4};
 
-use crate::triangle::Triangle;
+use crate::mesh::Triangle;
 
 // Triangle optimized for intersection tests
 pub struct TriangleOpt {
@@ -64,12 +64,13 @@ impl TriangleOpt {
     }
 }
 
-impl From<&Triangle> for TriangleOpt {
+impl From<&Triangle<'_>> for TriangleOpt {
     fn from(triangle: &Triangle) -> TriangleOpt {
+        let verts = triangle.vertices();
         TriangleOpt {
-            v0v1: triangle.verts[1] - triangle.verts[0],
-            v0v2: triangle.verts[2] - triangle.verts[0],
-            v0: triangle.verts[0],
+            v0v1: *verts[1] - *verts[0],
+            v0v2: *verts[2] - *verts[0],
+            v0: *verts[0],
         }
     }
 }
