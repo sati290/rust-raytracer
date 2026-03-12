@@ -1,18 +1,19 @@
-use ultraviolet::{Vec3, Vec4};
+use ultraviolet::{Vec3, Vec3x4, Vec4};
+use wide::{CmpLe, f32x4};
 
 #[derive(Clone)]
 #[repr(C, align(16))]
-pub struct Ray {
+pub struct StreamRay {
     pub origin_far: Vec4,           // x, y, z, near
     pub direction_recip_near: Vec4, // x, y, z, far
     pub direction: Vec4,
 }
 
-impl Ray {
+impl StreamRay {
     #[must_use]
     pub fn new(origin: &Vec3, direction: &Vec3, near: f32, far: f32) -> Self {
         let dir_recip = Vec3::one() / *direction;
-        Ray {
+        StreamRay {
             origin_far: Vec4::new(origin.x, origin.y, origin.z, far),
             direction: Vec4::from(*direction),
             direction_recip_near: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, near),
@@ -32,5 +33,40 @@ impl Ray {
     #[must_use]
     pub fn hit_pos(&self) -> Vec3 {
         self.origin_far.xyz() + self.direction.xyz() * self.hit_dist()
+    }
+}
+
+#[derive(Clone)]
+pub struct Ray4 {
+    pub origin: Vec3x4,
+    pub direction: Vec3x4,
+    pub near: f32x4,
+    pub far: f32x4,
+}
+
+impl Ray4 {
+    #[must_use]
+    pub fn new(origin: &Vec3x4, direction: &Vec3x4, near: &f32x4, far: &f32x4) -> Self {
+        Ray4 {
+            origin: *origin,
+            direction: *direction,
+            near: *near,
+            far: *far,
+        }
+    }
+
+    #[must_use]
+    pub fn _is_hit(&self) -> i32 {
+        self.far.cmp_le(f32::INFINITY).move_mask()
+    }
+
+    #[must_use]
+    pub fn hit_dist(&self) -> f32x4 {
+        self.far
+    }
+
+    #[must_use]
+    pub fn hit_pos(&self) -> Vec3x4 {
+        self.origin + self.direction * self.hit_dist()
     }
 }

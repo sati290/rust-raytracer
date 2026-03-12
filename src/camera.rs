@@ -118,7 +118,7 @@ impl<'a> CameraRayGenerator<'a> {
         (self.current_ray + sp_offset).normalized()
     }
 
-    pub fn _sample4<R: Rng>(&self, rng: &mut R) -> Vec3x4 {
+    pub fn sample4<R: Rng>(&self, rng: &mut R) -> Vec3x4 {
         let sp_x = f32x4::from(rng.random::<[f32; 4]>());
         let sp_y = f32x4::from(rng.random::<[f32; 4]>());
 

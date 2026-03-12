@@ -1,10 +1,10 @@
 use arrayvec::ArrayVec;
 use ultraviolet::Vec3;
 
-use crate::{aabb::Aabb, bvh::*, ray::Ray, trace_stats::TraceStats};
+use crate::{aabb::Aabb, bvh::*, ray::StreamRay, trace_stats::TraceStats};
 
 impl Bvh {
-    pub fn _occluded1_simple(&self, ray: &Ray, stats: &mut TraceStats) -> bool {
+    pub fn _occluded1_simple(&self, ray: &StreamRay, stats: &mut TraceStats) -> bool {
         stats.trace_start(1);
 
         let mut stack = ArrayVec::<&BvhNode, 32>::new();

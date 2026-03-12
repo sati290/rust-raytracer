@@ -3,14 +3,14 @@ use std::ops::Range;
 use arrayvec::ArrayVec;
 use ultraviolet::Vec3x4;
 
-use crate::{bvh::*, ray::Ray, trace_stats::TraceStats};
+use crate::{bvh::*, ray::StreamRay, trace_stats::TraceStats};
 
 type RayIdx = u32;
 
 impl Bvh {
     pub fn intersect_stream(
         &self,
-        rays: &mut [Ray],
+        rays: &mut [StreamRay],
         hit_objects: &mut [Option<u32>],
         stats: &mut TraceStats,
     ) {
@@ -198,7 +198,7 @@ impl Bvh {
         }
     }
 
-    pub fn occluded_stream(&self, rays: &mut [Ray], occluded: &mut [bool], stats: &mut TraceStats) {
+    pub fn occluded_stream(&self, rays: &mut [StreamRay], occluded: &mut [bool], stats: &mut TraceStats) {
         assert!(rays.len() <= RayIdx::MAX as usize);
         use safe_arch::*;
 
@@ -381,7 +381,7 @@ impl Bvh {
         &self,
         triangles_range: Range<usize>,
         ray_indices: &[RayIdx],
-        rays: &mut [Ray],
+        rays: &mut [StreamRay],
         hit_objects: &mut [Option<RayIdx>],
     ) {
         for ray_chunk_indices in ray_indices.chunks(4) {
@@ -425,7 +425,7 @@ impl Bvh {
         &self,
         triangles_range: Range<usize>,
         ray_indices: &[RayIdx],
-        rays: &mut [Ray],
+        rays: &mut [StreamRay],
         occluded: &mut [bool],
     ) {
         for ray_chunk_indices in ray_indices.chunks(4) {

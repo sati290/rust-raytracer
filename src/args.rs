@@ -6,6 +6,7 @@ pub enum TraceMode {
     StreamShadowImmediate,
     StreamCameraOnly,
     Standard1,
+    Standard4,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -36,4 +37,7 @@ pub struct Args {
 
     #[arg(long, default_value_t = false)]
     pub singlethread: bool,
+
+    #[arg(long, short = 'p', default_value_t = false)]
+    pub progress: bool,
 }

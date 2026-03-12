@@ -1,6 +1,7 @@
 mod build;
 mod intersect1;
 mod intersect1_simple;
+mod intersect4;
 mod intersect_stream;
 
 use std::ops::Range;

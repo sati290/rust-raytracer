@@ -5,7 +5,7 @@ use crate::{
     Tile,
     camera::{Camera, CameraRayGenerator, Rect},
     integrators::common::*,
-    ray::Ray,
+    ray::StreamRay,
     scene::Scene,
 };
 
@@ -15,7 +15,7 @@ pub fn generate_rays<R: Rng>(
     region: &Rect,
     samples: u32,
     rng: &mut R,
-    rays: &mut Vec<Ray>,
+    rays: &mut Vec<StreamRay>,
     path_infos: &mut Vec<PathInfo>,
 ) {
     let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
@@ -23,7 +23,7 @@ pub fn generate_rays<R: Rng>(
         for _ in 0..samples / 8 {
             let dirs: [Vec3; 8] = generator.sample8(rng).into();
             for d in dirs {
-                rays.push(Ray::new(&camera.position(), &d, 0., f32::INFINITY));
+                rays.push(StreamRay::new(&camera.position(), &d, 0., f32::INFINITY));
                 path_infos.push(PathInfo {
                     weight: Vec3::one(),
                     destination_idx: generator.current_pixel_idx(),
@@ -34,7 +34,7 @@ pub fn generate_rays<R: Rng>(
 
         for _ in 0..samples % 8 {
             let dir = generator.sample(rng);
-            rays.push(Ray::new(&camera.position(), &dir, 0., f32::INFINITY));
+            rays.push(StreamRay::new(&camera.position(), &dir, 0., f32::INFINITY));
             path_infos.push(PathInfo {
                 weight: Vec3::one(),
                 destination_idx: generator.current_pixel_idx(),
@@ -106,9 +106,8 @@ pub fn integrate_tile_stream<R: Rng>(
                 // Shadow ray
                 if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
                     sample_light(&dir_out, normal, &hit_pos, light)
-                    && shadow_weight != Vec3::zero()
                 {
-                    shadow_rays.push(Ray::new(
+                    shadow_rays.push(StreamRay::new(
                         &hit_pos,
                         &shadow_ray_dir,
                         SHADOW_RAY_NEAR,
@@ -124,7 +123,7 @@ pub fn integrate_tile_stream<R: Rng>(
                 if path_info.bounces < max_bounces {
                     let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
                     rays[new_rays_len] =
-                        Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
+                        StreamRay::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
                     ray_infos[new_rays_len] = path_info.diffuse(&weight);
                     new_rays_len += 1;
                 }
@@ -204,10 +203,9 @@ pub fn integrate_tile_stream_shadow_immediate<R: Rng>(
                 // Shadow ray
                 if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
                     sample_light(&dir_out, normal, &hit_pos, light)
-                    && shadow_weight != Vec3::zero()
                 {
                     let shadow_ray =
-                        Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
+                        StreamRay::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
                     if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
                         *tile.pixels[path_info.destination_idx as usize] +=
                             Vec4::from(path_info.weight * shadow_weight);
@@ -218,7 +216,7 @@ pub fn integrate_tile_stream_shadow_immediate<R: Rng>(
                 if path_info.bounces < max_bounces {
                     let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
                     rays[new_rays_len] =
-                        Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
+                        StreamRay::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
                     ray_infos[new_rays_len] = path_info.diffuse(&weight);
                     new_rays_len += 1;
                 }
@@ -282,9 +280,8 @@ pub fn integrate_stream_camera_only<R: Rng>(
             // Shadow ray
             if let Some((shadow_ray_dir, shadow_far, shadow_weight)) =
                 sample_light(&dir_out, normal, &hit_pos, light)
-                && shadow_weight != Vec3::zero()
             {
-                let shadow_ray = Ray::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
+                let shadow_ray = StreamRay::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
                 if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
                     *tile.pixels[path_info.destination_idx as usize] +=
                         Vec4::from(path_info.weight * shadow_weight);
@@ -297,7 +294,7 @@ pub fn integrate_stream_camera_only<R: Rng>(
             }
 
             let (dir_in, weight) = sample_diffuse_ray(&dir_out, normal, &mut tile.rng);
-            ray = Ray::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
+            ray = StreamRay::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
             hit = scene.bvh.intersect1(&mut ray, &mut tile.trace_stats);
             path_info = path_info.diffuse(&weight);
         }

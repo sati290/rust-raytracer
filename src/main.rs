@@ -10,11 +10,13 @@ mod ray;
 mod scene;
 mod trace_stats;
 mod triangle_opt;
+mod utils;
 
 use crate::args::{Args, TraceMode};
 use crate::camera::Rect;
 use crate::integrators::integrate_stream::*;
 use crate::integrators::integrate1::integrate_tile1;
+use crate::integrators::integrate4::integrate_tile4;
 use crate::scene::load_scene;
 use crate::trace_stats::TraceStats;
 use chrono::Local;
@@ -25,6 +27,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::fs;
+use std::sync::atomic::AtomicU32;
 use std::time::Instant;
 use ultraviolet::{Vec3, Vec3x4, Vec4};
 use wide::{CmpGe, f32x4};
@@ -124,6 +127,9 @@ fn main() {
         args.max_bounces
     );
 
+    let num_tiles = tiles.len();
+    let num_tiles_completed = AtomicU32::new(0);
+
     let time_start = Instant::now();
     let trace_fn = |tile| {
         let trace_fn = match args.mode {
@@ -131,6 +137,7 @@ fn main() {
             TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
             TraceMode::Standard1 => integrate_tile1,
+            TraceMode::Standard4 => integrate_tile4,
         };
 
         trace_fn(
@@ -140,6 +147,11 @@ fn main() {
             args.samples,
             args.max_bounces,
         );
+
+        if args.progress {
+            let n = num_tiles_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            println!("{}/{} tiles completed", n + 1, num_tiles);
+        }
     };
 
     if args.singlethread {

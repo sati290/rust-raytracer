@@ -92,7 +92,13 @@ impl Aabb {
     }
 
     #[must_use]
-    pub fn _intersect_simd(&self, ray_origin: &Vec3x4, ray_direction_recip: &Vec3x4) -> f32x4 {
+    pub fn _intersect_simd(
+        &self,
+        ray_origin: &Vec3x4,
+        ray_direction_recip: &Vec3x4,
+        ray_near: &f32x4,
+        ray_far: &f32x4,
+    ) -> f32x4 {
         let origin_dir_recip = *ray_origin * *ray_direction_recip;
 
         let tx1 = f32x4::splat(self.min.x).mul_sub(ray_direction_recip.x, origin_dir_recip.x);
@@ -113,6 +119,9 @@ impl Aabb {
         let tmin = tmin.max(tz1.min(tz2));
         let tmax = tmax.min(tz1.max(tz2));
 
-        tmax.cmp_ge(tmin.max(f32x4::ZERO))
+        let tmin = tmin.max(*ray_near);
+        let tmax = tmax.min(*ray_far);
+
+        tmax.cmp_ge(tmin)
     }
 }
