@@ -136,8 +136,8 @@ fn main() {
             TraceMode::Stream => integrate_tile_stream,
             TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
-            TraceMode::Standard1 => integrate_tile1,
-            TraceMode::Standard4 => integrate_tile4,
+            TraceMode::SingleRay => integrate_tile1,
+            TraceMode::Packet4 => integrate_tile4,
         };
 
         trace_fn(

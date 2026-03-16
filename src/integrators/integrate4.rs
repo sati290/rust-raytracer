@@ -6,15 +6,16 @@ use wide::f32x4;
 
 use crate::{
     Tile,
+    bvh::BvhIntersector4,
     camera::CameraRayGenerator,
     integrators::common::{SHADOW_RAY_NEAR, sample_diffuse_ray4, sample_light4},
-    ray::Ray4,
+    ray::{Ray4, RayHit4},
     scene::Scene,
     trace_stats::TraceStats,
 };
 
 fn integrate_ray4<R: Rng>(
-    camera_ray: Ray4,
+    camera_ray: RayHit4,
     scene: &Scene,
     max_bounces: u8,
     dest_pixel: &mut Vec4,
@@ -30,13 +31,13 @@ fn integrate_ray4<R: Rng>(
 
     let mut bounces = 0;
     let mut weight = Vec3x4::one();
-    let mut ray = camera_ray;
+    let mut ray_hit = camera_ray;
     let mut ray_valid = 0b1111;
 
     loop {
-        let hit = bvh.intersect4(&mut ray, ray_valid, trace_stats);
+        BvhIntersector4::intersect4(bvh, &mut ray_hit, ray_valid, trace_stats);
         let mut normal = [Vec3::zero(); 4];
-        for (i, h) in hit.into_iter().enumerate() {
+        for (i, h) in ray_hit.obj_idx.into_iter().enumerate() {
             if let Some(h) = h {
                 let hit_obj = mesh.get_triangle(h);
                 normal[i] = *hit_obj.normal();
@@ -49,8 +50,8 @@ fn integrate_ray4<R: Rng>(
             break;
         }
 
-        let hit_pos = ray.hit_pos();
-        let dir_out = -ray.direction;
+        let hit_pos = ray_hit.ray.hit_pos();
+        let dir_out = -ray_hit.ray.direction;
         let normal = Vec3x4::from(normal);
 
         // Shadow ray
@@ -64,7 +65,7 @@ fn integrate_ray4<R: Rng>(
                 &f32x4::splat(SHADOW_RAY_NEAR),
                 &shadow_far,
             );
-            let occluded = bvh.occluded4(&shadow_ray, shadow_valid, trace_stats);
+            let occluded = BvhIntersector4::occluded4(bvh, &shadow_ray, shadow_valid, trace_stats);
             let light_valid = shadow_valid & !occluded;
             let light_weight: [Vec3; 4] = (weight * shadow_weight).into();
             for (i, w) in light_weight.into_iter().enumerate() {
@@ -80,12 +81,13 @@ fn integrate_ray4<R: Rng>(
         }
 
         let (dir_in, diffuse_weight) = sample_diffuse_ray4(&dir_out, &normal, ray_valid, rng);
-        ray = Ray4::new(
+        ray_hit = Ray4::new(
             &hit_pos,
             &dir_in,
             &f32x4::splat(SHADOW_RAY_NEAR),
             &f32x4::splat(f32::INFINITY),
-        );
+        )
+        .into();
         bounces += 1;
         weight *= diffuse_weight;
     }
@@ -117,7 +119,8 @@ pub fn integrate_tile4<R: Rng>(
                     &ray_dir,
                     &f32x4::ZERO,
                     &f32x4::splat(f32::INFINITY),
-                ),
+                )
+                .into(),
                 scene,
                 max_bounces,
                 dest_pixel,

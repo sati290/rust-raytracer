@@ -1,5 +1,5 @@
 use ultraviolet::{Vec3, Vec3x4, Vec4};
-use wide::{CmpLe, f32x4};
+use wide::f32x4;
 
 #[derive(Clone)]
 #[repr(C, align(16))]
@@ -56,11 +56,6 @@ impl Ray4 {
     }
 
     #[must_use]
-    pub fn _is_hit(&self) -> i32 {
-        self.far.cmp_le(f32::INFINITY).move_mask()
-    }
-
-    #[must_use]
     pub fn hit_dist(&self) -> f32x4 {
         self.far
     }
@@ -68,5 +63,20 @@ impl Ray4 {
     #[must_use]
     pub fn hit_pos(&self) -> Vec3x4 {
         self.origin + self.direction * self.hit_dist()
+    }
+}
+
+#[derive(Clone)]
+pub struct RayHit4 {
+    pub ray: Ray4,
+    pub obj_idx: [Option<u32>; 4],
+}
+
+impl From<Ray4> for RayHit4 {
+    fn from(ray: Ray4) -> Self {
+        RayHit4 {
+            ray,
+            obj_idx: [None; _],
+        }
     }
 }
