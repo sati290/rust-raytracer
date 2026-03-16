@@ -2,7 +2,7 @@ use core::f32;
 
 use rand::Rng;
 use ultraviolet::{Vec3, Vec3x4, Vec4};
-use wide::f32x4;
+use wide::{CmpLt, f32x4};
 
 use crate::{
     Tile,
@@ -32,21 +32,20 @@ fn integrate_ray4<R: Rng>(
     let mut bounces = 0;
     let mut weight = Vec3x4::one();
     let mut ray_hit = camera_ray;
-    let mut ray_valid = 0b1111;
+    let mut ray_valid = f32x4::splat(-0.);
 
     loop {
-        BvhIntersector4::intersect4(bvh, &mut ray_hit, ray_valid, trace_stats);
+        BvhIntersector4::intersect4(bvh, &mut ray_hit, trace_stats);
         let mut normal = [Vec3::zero(); 4];
         for (i, h) in ray_hit.obj_idx.into_iter().enumerate() {
             if let Some(h) = h {
                 let hit_obj = mesh.get_triangle(h);
                 normal[i] = *hit_obj.normal();
-            } else {
-                ray_valid &= !(1 << i);
             }
         }
+        ray_valid &= ray_hit.ray.far.cmp_lt(f32::INFINITY);
 
-        if ray_valid == 0 {
+        if ray_valid.none() {
             break;
         }
 
@@ -56,17 +55,17 @@ fn integrate_ray4<R: Rng>(
 
         // Shadow ray
         let (shadow_ray_dir, shadow_far, shadow_weight, shadow_valid) =
-            sample_light4(&dir_out, &normal, &hit_pos, light);
-        let shadow_valid = shadow_valid & ray_valid;
-        if shadow_valid != 0 {
+            sample_light4(&dir_out, &normal, &hit_pos, &ray_valid, light);
+        if shadow_valid.any() {
             let shadow_ray = Ray4::new(
                 &hit_pos,
                 &shadow_ray_dir,
                 &f32x4::splat(SHADOW_RAY_NEAR),
                 &shadow_far,
+                &shadow_valid,
             );
-            let occluded = BvhIntersector4::occluded4(bvh, &shadow_ray, shadow_valid, trace_stats);
-            let light_valid = shadow_valid & !occluded;
+            let occluded = BvhIntersector4::occluded4(bvh, &shadow_ray, trace_stats);
+            let light_valid = (shadow_valid & !occluded).move_mask();
             let light_weight: [Vec3; 4] = (weight * shadow_weight).into();
             for (i, w) in light_weight.into_iter().enumerate() {
                 if light_valid & 1 << i != 0 {
@@ -80,12 +79,13 @@ fn integrate_ray4<R: Rng>(
             break;
         }
 
-        let (dir_in, diffuse_weight) = sample_diffuse_ray4(&dir_out, &normal, ray_valid, rng);
+        let (dir_in, diffuse_weight) = sample_diffuse_ray4(&dir_out, &normal, rng);
         ray_hit = Ray4::new(
             &hit_pos,
             &dir_in,
             &f32x4::splat(SHADOW_RAY_NEAR),
             &f32x4::splat(f32::INFINITY),
+            &ray_valid,
         )
         .into();
         bounces += 1;
@@ -119,6 +119,7 @@ pub fn integrate_tile4<R: Rng>(
                     &ray_dir,
                     &f32x4::ZERO,
                     &f32x4::splat(f32::INFINITY),
+                    &f32x4::splat(-0.),
                 )
                 .into(),
                 scene,

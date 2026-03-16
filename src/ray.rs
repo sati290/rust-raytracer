@@ -42,16 +42,24 @@ pub struct Ray4 {
     pub direction: Vec3x4,
     pub near: f32x4,
     pub far: f32x4,
+    pub valid: f32x4,
 }
 
 impl Ray4 {
     #[must_use]
-    pub fn new(origin: &Vec3x4, direction: &Vec3x4, near: &f32x4, far: &f32x4) -> Self {
+    pub fn new(
+        origin: &Vec3x4,
+        direction: &Vec3x4,
+        near: &f32x4,
+        far: &f32x4,
+        valid: &f32x4,
+    ) -> Self {
         Ray4 {
             origin: *origin,
             direction: *direction,
-            near: *near,
-            far: *far,
+            near: valid.blend(*near, f32x4::splat(f32::INFINITY)),
+            far: valid.blend(*far, f32x4::splat(f32::NEG_INFINITY)),
+            valid: *valid,
         }
     }
 

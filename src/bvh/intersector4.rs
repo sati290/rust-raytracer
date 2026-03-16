@@ -71,21 +71,21 @@ impl BvhIntersector4 {
     }
 
     #[must_use]
-    pub fn occluded4(bvh: &Bvh, ray: &Ray4, ray_valid: u32, stats: &mut TraceStats) -> u32 {
-        stats.trace_start(ray_valid.count_ones() as u64);
+    pub fn occluded4(bvh: &Bvh, ray: &Ray4, stats: &mut TraceStats) -> f32x4 {
+        stats.trace_start(ray.valid.move_mask().count_ones() as u64);
 
-        let mut active = ray_valid;
-        let mut stack = ArrayVec::<(&BvhNode, u32), 32>::new();
+        let mut active = ray.valid;
+        let mut stack = ArrayVec::<_, 32>::new();
         let simd_ray = SimdRay4x2Interleaved::from(ray);
 
         let mut cur_node = Some((&bvh.root_node, active));
         while let Some((node, node_active)) = cur_node {
-            if node_active & active == 0 {
+            if (node_active & active).none() {
                 cur_node = stack.pop();
                 continue;
             }
 
-            let num_valid_rays = node_active.count_ones();
+            let num_valid_rays = node_active.move_mask().count_ones();
             match node {
                 BvhNode::Inner {
                     child_bbox,
@@ -96,17 +96,17 @@ impl BvhIntersector4 {
                     let (hit_mask_l, hit_mask_r, _, _) =
                         Self::intersect_node4(child_bbox, &simd_ray);
 
-                    let hit_mask_l = hit_mask_l.move_mask() as u32 & active;
-                    let hit_mask_r = hit_mask_r.move_mask() as u32 & active;
+                    let hit_l = hit_mask_l & active;
+                    let hit_r = hit_mask_r & active;
 
-                    if hit_mask_l != 0 {
-                        cur_node = Some((&children[0], hit_mask_l));
+                    if hit_l.any() {
+                        cur_node = Some((&children[0], hit_l));
 
-                        if hit_mask_r != 0 {
-                            stack.push((&children[1], hit_mask_r));
+                        if hit_r.any() {
+                            stack.push((&children[1], hit_r));
                         }
-                    } else if hit_mask_r != 0 {
-                        cur_node = Some((&children[1], hit_mask_r));
+                    } else if hit_r.any() {
+                        cur_node = Some((&children[1], hit_r));
                     } else {
                         cur_node = stack.pop();
                     }
@@ -116,11 +116,10 @@ impl BvhIntersector4 {
                     for obj_idx in triangles_range.clone() {
                         let obj = &bvh.triangles[obj_idx];
                         let hit = obj.intersect_simd(&ray.origin, &ray.direction);
-                        let hit_mask =
-                            (hit.cmp_ge(ray.near) & hit.cmp_lt(ray.far)).move_mask() as u32;
+                        let hit_mask = hit.cmp_ge(ray.near) & hit.cmp_lt(ray.far);
                         active &= !hit_mask;
-                        if active == 0 {
-                            return !active & ray_valid;
+                        if active.none() {
+                            return !active & ray.valid;
                         }
                     }
 
@@ -129,20 +128,11 @@ impl BvhIntersector4 {
             }
         }
 
-        !active & ray_valid
+        !active & ray.valid
     }
 
-    pub fn intersect4(bvh: &Bvh, ray_hit: &mut RayHit4, ray_valid: u32, stats: &mut TraceStats) {
-        stats.trace_start(ray_valid.count_ones() as u64);
-
-        let valid = f32x4::new([
-            if ray_valid & 1 << 0 != 0 { -0. } else { 0. },
-            if ray_valid & 1 << 1 != 0 { -0. } else { 0. },
-            if ray_valid & 1 << 2 != 0 { -0. } else { 0. },
-            if ray_valid & 1 << 3 != 0 { -0. } else { 0. },
-        ]);
-        ray_hit.ray.near = valid.blend(ray_hit.ray.near, f32x4::splat(f32::INFINITY));
-        ray_hit.ray.far = valid.blend(ray_hit.ray.far, f32x4::splat(f32::NEG_INFINITY));
+    pub fn intersect4(bvh: &Bvh, ray_hit: &mut RayHit4, stats: &mut TraceStats) {
+        stats.trace_start(ray_hit.ray.valid.move_mask().count_ones() as u64);
 
         let mut stack = ArrayVec::<_, 32>::new();
         let mut simd_ray = SimdRay4x2Interleaved::from(&ray_hit.ray);

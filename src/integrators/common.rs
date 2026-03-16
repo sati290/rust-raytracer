@@ -4,7 +4,11 @@ use rand::Rng;
 use ultraviolet::{Rotor3, Rotor3x4, Vec3, Vec3x4};
 use wide::{CmpEq as _, CmpGt as _, f32x4};
 
-use crate::{brdf::Brdf, light::PointLight, utils::rotor_blend};
+use crate::{
+    brdf::{Brdf, Brdf4},
+    light::PointLight,
+    utils::rotor_blend,
+};
 
 pub const SHADOW_RAY_NEAR: f32 = 1e-5;
 
@@ -56,12 +60,13 @@ pub fn sample_light4(
     dir_out: &Vec3x4,
     normal: &Vec3x4,
     hit_pos: &Vec3x4,
+    valid: &f32x4,
     light: &PointLight,
-) -> (Vec3x4, f32x4, Vec3x4, u32) {
+) -> (Vec3x4, f32x4, Vec3x4, f32x4) {
     let light_vec = Vec3x4::splat(light.pos) - *hit_pos;
     let ndotl = normal.dot(light_vec);
-    let mut mask = ((ndotl * normal.dot(*dir_out)).cmp_gt(f32x4::ZERO)).move_mask() as u32;
-    if mask == 0 {
+    let mut mask = (ndotl * normal.dot(*dir_out)).cmp_gt(f32x4::ZERO) & valid;
+    if mask.none() {
         return (Vec3x4::zero(), f32x4::ZERO, Vec3x4::zero(), mask);
     }
 
@@ -72,7 +77,7 @@ pub fn sample_light4(
     let weight =
         Vec3x4::splat(Brdf::eval()) * ndotl * Vec3x4::splat(light.intensity) / light_dist_sq;
 
-    mask &= weight.mag_sq().cmp_gt(f32x4::ZERO).move_mask() as u32;
+    mask &= weight.mag_sq().cmp_gt(f32x4::ZERO);
 
     (dir_in, light_dist, weight, mask)
 }
@@ -96,12 +101,10 @@ pub fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) ->
     (dir_in, weight)
 }
 
-// TODO: broken
 #[must_use]
 pub fn sample_diffuse_ray4<R: Rng>(
     dir_out: &Vec3x4,
     normal: &Vec3x4,
-    ray_valid: u32,
     rng: &mut R,
 ) -> (Vec3x4, Vec3x4) {
     let neg_z = -Vec3x4::unit_z();
@@ -113,21 +116,11 @@ pub fn sample_diffuse_ray4<R: Rng>(
     );
     let local_to_world = world_to_local.reversed();
 
-    let dir_out_local: [Vec3; 4] = (world_to_local * *dir_out).into();
-    let mut dir_in_local = [Vec3::zero(); 4];
-    let mut pdf = [0.; 4];
-    let mut brdf = [Vec3::zero(); 4];
-    for (i, d) in dir_out_local.into_iter().enumerate() {
-        if ray_valid & 1 << i != 0 {
-            let (d, p, b) = Brdf::sample_eval(&d, rng);
-            dir_in_local[i] = d;
-            pdf[i] = p;
-            brdf[i] = b;
-        }
-    }
-    let dir_in = local_to_world * Vec3x4::from(dir_in_local);
+    let dir_out_local = world_to_local * *dir_out;
+    let (dir_in_local, pdf, brdf) = Brdf4::sample_eval(&dir_out_local, rng);
+    let dir_in = local_to_world * dir_in_local;
     let ndotl = normal.dot(dir_in).abs();
-    let weight = Vec3x4::from(brdf) * ndotl / f32x4::from(pdf);
+    let weight = brdf * ndotl / pdf;
 
     (dir_in, weight)
 }
