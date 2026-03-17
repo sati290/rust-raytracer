@@ -35,7 +35,7 @@ fn integrate_ray4<R: Rng>(
     let mut ray_valid = f32x4::splat(-0.);
 
     loop {
-        BvhIntersector4::intersect4(bvh, &mut ray_hit, trace_stats);
+        BvhIntersector4::intersect(bvh, &mut ray_hit, trace_stats);
         let mut normal = [Vec3::zero(); 4];
         for (i, h) in ray_hit.obj_idx.into_iter().enumerate() {
             if let Some(h) = h {
@@ -64,7 +64,7 @@ fn integrate_ray4<R: Rng>(
                 &shadow_far,
                 &shadow_valid,
             );
-            let occluded = BvhIntersector4::occluded4(bvh, &shadow_ray, trace_stats);
+            let occluded = BvhIntersector4::occluded(bvh, &shadow_ray, trace_stats);
             let light_valid = (shadow_valid & !occluded).move_mask();
             let light_weight: [Vec3; 4] = (weight * shadow_weight).into();
             for (i, w) in light_weight.into_iter().enumerate() {

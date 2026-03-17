@@ -3,6 +3,7 @@ mod intersect1;
 mod intersect1_simple;
 mod intersect_stream;
 mod intersector4;
+mod node_intersector4;
 mod simd_ray;
 
 use std::ops::Range;
