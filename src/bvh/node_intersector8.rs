@@ -7,6 +7,7 @@ use crate::bvh::simd_ray::SimdRay8;
 pub struct BvhNodeIntersector8 {}
 
 impl BvhNodeIntersector8 {
+    #[inline(always)]
     pub fn intersect(child_bbox: &Vec3x4, index: usize, ray: &SimdRay8) -> (f32x8, f32x8) {
         // R1   R2   R3   R4   R5   R6   R7   R8
         // MINL MINR MAXL MAXR

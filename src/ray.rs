@@ -11,6 +11,7 @@ pub struct StreamRay {
 
 impl StreamRay {
     #[must_use]
+    #[inline]
     pub fn new(origin: &Vec3, direction: &Vec3, near: f32, far: f32) -> Self {
         let dir_recip = Vec3::one() / *direction;
         StreamRay {
@@ -21,16 +22,19 @@ impl StreamRay {
     }
 
     #[must_use]
+    #[inline]
     pub fn _is_hit(&self) -> bool {
         self.origin_far.w < f32::INFINITY
     }
 
     #[must_use]
+    #[inline]
     pub fn hit_dist(&self) -> f32 {
         self.origin_far.w
     }
 
     #[must_use]
+    #[inline]
     pub fn hit_pos(&self) -> Vec3 {
         self.origin_far.xyz() + self.direction.xyz() * self.hit_dist()
     }
@@ -50,6 +54,7 @@ macro_rules! ray_n {
 
             impl $n {
                 #[must_use]
+                #[inline]
                 pub fn new(
                     origin: &$vt,
                     direction: &$vt,
@@ -67,11 +72,13 @@ macro_rules! ray_n {
                 }
 
                 #[must_use]
+                #[inline]
                 pub fn hit_dist(&self) -> $t {
                     self.far
                 }
 
                 #[must_use]
+                #[inline]
                 pub fn hit_pos(&self) -> $vt {
                     self.origin + self.direction * self.hit_dist()
                 }
@@ -84,6 +91,7 @@ macro_rules! ray_n {
             }
 
             impl From<$n> for $nh {
+                #[inline]
                 fn from(ray: $n) -> Self {
                     $nh {
                         ray,

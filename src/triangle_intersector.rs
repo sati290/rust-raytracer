@@ -9,6 +9,8 @@ macro_rules! triangle_intersector_n {
             pub struct $name;
 
             impl $name {
+                #[must_use]
+                #[inline]
                 pub fn intersect(triangle: &TriangleOpt, ray_origin: &$vector, ray_direction: &$vector) -> $scalar {
                     let v0v1 = $vector::splat(triangle.v0v1);
                     let v0v2 = $vector::splat(triangle.v0v2);

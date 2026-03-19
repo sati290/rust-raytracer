@@ -20,6 +20,7 @@ pub struct PathInfo {
 }
 
 impl PathInfo {
+    #[inline]
     pub fn diffuse(&self, weight: &Vec3) -> Self {
         PathInfo {
             weight: self.weight * *weight,
@@ -33,6 +34,7 @@ pub struct IntegratorsCommon1;
 
 impl IntegratorsCommon1 {
     #[must_use]
+    #[inline]
     pub fn sample_light(
         dir_out: &Vec3,
         normal: &Vec3,
@@ -59,6 +61,7 @@ impl IntegratorsCommon1 {
     }
 
     #[must_use]
+    #[inline]
     pub fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) -> (Vec3, Vec3) {
         let world_to_local = if *normal == -Vec3::unit_z() {
             Rotor3::from_rotation_xz(PI)
@@ -85,6 +88,7 @@ macro_rules! integrators_common_n {
 
             impl $n {
                 #[must_use]
+                #[inline]
                 pub fn sample_light(
                     dir_out: &$vt,
                     normal: &$vt,
@@ -111,6 +115,7 @@ macro_rules! integrators_common_n {
                 }
 
                 #[must_use]
+                #[inline]
                 pub fn sample_diffuse_ray<R: Rng>(
                     dir_out: &$vt,
                     normal: &$vt,

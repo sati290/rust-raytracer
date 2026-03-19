@@ -12,6 +12,7 @@ pub struct TriangleOpt {
 
 impl TriangleOpt {
     #[must_use]
+    #[inline]
     pub fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> f32 {
         let pvec = ray_direction.cross(self.v0v1);
         let det = self.v0v2.dot(pvec);
@@ -38,6 +39,7 @@ impl TriangleOpt {
     }
 
     #[must_use]
+    #[inline]
     pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
         let v0v1 = Vec3x4::splat(self.v0v1);
         let v0v2 = Vec3x4::splat(self.v0v2);

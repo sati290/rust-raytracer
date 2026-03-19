@@ -17,12 +17,14 @@ macro_rules! simd_ray_n {
             }
 
             impl $name {
+                #[inline]
                 pub fn update_far(&mut self, far: &[f32; $n]) {
                     self.far = $t::from(*far);
                 }
             }
 
             impl From<&$ray> for $name {
+                #[inline]
                 fn from(ray: &$ray) -> Self {
                     use safe_arch::*;
 
@@ -80,6 +82,7 @@ pub struct SimdRay4x2Interleaved {
 }
 
 impl SimdRay4x2Interleaved {
+    #[inline]
     pub fn update_far(&mut self, far: &[f32; 4]) {
         self.far = set_m256(
             far[3], far[3], far[2], far[2], far[1], far[1], far[0], far[0],
@@ -88,6 +91,7 @@ impl SimdRay4x2Interleaved {
 }
 
 impl From<&Ray4> for SimdRay4x2Interleaved {
+    #[inline]
     fn from(ray: &Ray4) -> Self {
         use safe_arch::*;
 

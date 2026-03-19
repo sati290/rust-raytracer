@@ -7,6 +7,7 @@ use crate::bvh::simd_ray::SimdRay4;
 pub struct BvhNodeIntersector4 {}
 
 impl BvhNodeIntersector4 {
+    #[inline(always)]
     pub fn intersect(child_bbox: &Vec3x4, index: usize, ray: &SimdRay4) -> (f32x4, f32x4) {
         // R1   R2   R3   R4
         // MINL MINR MAXL MAXR

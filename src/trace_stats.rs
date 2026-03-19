@@ -24,15 +24,18 @@ impl TraceStats {
         }
     }
 
+    #[inline]
     pub fn trace_start(&mut self, total_rays: u64) {
         self.total_rays += total_rays;
     }
 
+    #[inline]
     pub fn inner_visit(&mut self, rays: u64) {
         self.inner_visit += 1;
         self.inner_rays += rays;
     }
 
+    #[inline]
     pub fn leaf_visit(&mut self, rays: u64, objects: u64) {
         self.leaf_visit += 1;
         self.leaf_rays += rays;

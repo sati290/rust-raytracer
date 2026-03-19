@@ -4,6 +4,8 @@ use rand::{Rng, RngExt};
 use ultraviolet::{Vec3, Vec3x4, Vec3x8};
 use wide::{f32x4, f32x8};
 
+#[must_use]
+#[inline]
 fn sample_cosine_weighted_hemisphere<R: Rng>(rng: &mut R) -> Vec3 {
     let u: [f32; 2] = rng.random();
 
@@ -17,16 +19,19 @@ pub struct Brdf1 {}
 
 impl Brdf1 {
     #[must_use]
+    #[inline]
     pub fn eval() -> Vec3 {
         Vec3::broadcast(0.8 / PI)
     }
 
     #[must_use]
+    #[inline]
     pub fn sample<R: Rng>(rng: &mut R) -> Vec3 {
         sample_cosine_weighted_hemisphere(rng)
     }
 
     #[must_use]
+    #[inline]
     pub fn sample_eval<R: Rng>(dir_out: &Vec3, rng: &mut R) -> (Vec3, f32, Vec3) {
         let mut dir_in = Self::sample(rng);
         let pfd = dir_in.z / PI;
@@ -38,6 +43,7 @@ impl Brdf1 {
     }
 
     #[must_use]
+    #[inline]
     pub fn _pdf(dir_out: Vec3, dir_in: Vec3) -> f32 {
         if dir_out.z * dir_in.z > 0. {
             dir_in.z / PI
@@ -54,11 +60,13 @@ macro_rules! brdf_n {
 
             impl $n {
                 #[must_use]
+                #[inline]
                 pub fn eval() -> $vt {
                     $vt::broadcast($t::splat(0.8 / PI))
                 }
 
                 #[must_use]
+                #[inline]
                 pub fn sample<R: Rng>(rng: &mut R) -> $vt {
                     let u0 = $t::from(rng.random::<$at>());
                     let u1 = $t::from(rng.random::<$at>());
@@ -70,6 +78,7 @@ macro_rules! brdf_n {
                 }
 
                 #[must_use]
+                #[inline]
                 pub fn sample_eval<R: Rng>(dir_out: &$vt, rng: &mut R) -> ($vt, $t, $vt) {
                     let mut dir_in = Self::sample(rng);
                     let pfd = dir_in.z / PI;
