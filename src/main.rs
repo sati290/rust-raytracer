@@ -9,14 +9,13 @@ mod mesh;
 mod ray;
 mod scene;
 mod trace_stats;
+mod triangle_intersector;
 mod triangle_opt;
 mod utils;
 
 use crate::args::{Args, TraceMode};
 use crate::camera::Rect;
-use crate::integrators::integrate_stream::*;
-use crate::integrators::integrate1::integrate_tile1;
-use crate::integrators::integrate4::integrate_tile4;
+use crate::integrators::*;
 use crate::scene::load_scene;
 use crate::trace_stats::TraceStats;
 use chrono::Local;
@@ -136,8 +135,10 @@ fn main() {
             TraceMode::Stream => integrate_tile_stream,
             TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
-            TraceMode::SingleRay => integrate_tile1,
-            TraceMode::Packet4 => integrate_tile4,
+            TraceMode::SingleRay => TileIntegrator1::integrate,
+            TraceMode::Packet4 => TileIntegrator4::integrate,
+            TraceMode::Packet4x2 => TileIntegrator4x2::integrate,
+            TraceMode::Packet8 => TileIntegrator8::integrate,
         };
 
         trace_fn(

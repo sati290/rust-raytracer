@@ -2,8 +2,11 @@ mod build;
 mod intersect1;
 mod intersect1_simple;
 mod intersect_stream;
-mod intersector4;
+mod intersector4x2;
+mod intersector_n;
 mod node_intersector4;
+mod node_intersector4x2;
+mod node_intersector8;
 mod simd_ray;
 
 use std::ops::Range;
@@ -11,7 +14,9 @@ use ultraviolet::Vec3x4;
 
 use crate::triangle_opt::TriangleOpt;
 
-pub use intersector4::BvhIntersector4;
+pub use intersector_n::BvhIntersector4;
+pub use intersector_n::BvhIntersector8;
+pub use intersector4x2::BvhIntersector4x2;
 
 enum BvhNode {
     Inner {

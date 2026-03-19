@@ -1,5 +1,5 @@
-use ultraviolet::{Vec3, Vec3x4, Vec4};
-use wide::f32x4;
+use ultraviolet::{Vec3, Vec3x4, Vec3x8, Vec4};
+use wide::{f32x4, f32x8};
 
 #[derive(Clone)]
 #[repr(C, align(16))]
@@ -36,55 +36,66 @@ impl StreamRay {
     }
 }
 
-#[derive(Clone)]
-pub struct Ray4 {
-    pub origin: Vec3x4,
-    pub direction: Vec3x4,
-    pub near: f32x4,
-    pub far: f32x4,
-    pub valid: f32x4,
+macro_rules! ray_n {
+    ($(($n:ident, $nh:ident, $c:literal, $t:ident, $vt:ident)),+) => {
+        $(
+            #[derive(Clone)]
+            pub struct $n {
+                pub origin: $vt,
+                pub direction: $vt,
+                pub near: $t,
+                pub far: $t,
+                pub valid: $t,
+            }
+
+            impl $n {
+                #[must_use]
+                pub fn new(
+                    origin: &$vt,
+                    direction: &$vt,
+                    near: &$t,
+                    far: &$t,
+                    valid: &$t,
+                ) -> Self {
+                    $n {
+                        origin: *origin,
+                        direction: *direction,
+                        near: valid.blend(*near, $t::splat(f32::INFINITY)),
+                        far: valid.blend(*far, $t::splat(f32::NEG_INFINITY)),
+                        valid: *valid,
+                    }
+                }
+
+                #[must_use]
+                pub fn hit_dist(&self) -> $t {
+                    self.far
+                }
+
+                #[must_use]
+                pub fn hit_pos(&self) -> $vt {
+                    self.origin + self.direction * self.hit_dist()
+                }
+            }
+
+            #[derive(Clone)]
+            pub struct $nh {
+                pub ray: $n,
+                pub obj_idx: [Option<u32>; $c],
+            }
+
+            impl From<$n> for $nh {
+                fn from(ray: $n) -> Self {
+                    $nh {
+                        ray,
+                        obj_idx: [None; _],
+                    }
+                }
+            }
+        )+
+    }
 }
 
-impl Ray4 {
-    #[must_use]
-    pub fn new(
-        origin: &Vec3x4,
-        direction: &Vec3x4,
-        near: &f32x4,
-        far: &f32x4,
-        valid: &f32x4,
-    ) -> Self {
-        Ray4 {
-            origin: *origin,
-            direction: *direction,
-            near: valid.blend(*near, f32x4::splat(f32::INFINITY)),
-            far: valid.blend(*far, f32x4::splat(f32::NEG_INFINITY)),
-            valid: *valid,
-        }
-    }
-
-    #[must_use]
-    pub fn hit_dist(&self) -> f32x4 {
-        self.far
-    }
-
-    #[must_use]
-    pub fn hit_pos(&self) -> Vec3x4 {
-        self.origin + self.direction * self.hit_dist()
-    }
-}
-
-#[derive(Clone)]
-pub struct RayHit4 {
-    pub ray: Ray4,
-    pub obj_idx: [Option<u32>; 4],
-}
-
-impl From<Ray4> for RayHit4 {
-    fn from(ray: Ray4) -> Self {
-        RayHit4 {
-            ray,
-            obj_idx: [None; _],
-        }
-    }
-}
+ray_n!(
+    (Ray4, RayHit4, 4, f32x4, Vec3x4),
+    (Ray8, RayHit8, 8, f32x8, Vec3x8)
+);

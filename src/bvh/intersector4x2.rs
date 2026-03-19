@@ -2,14 +2,14 @@ use arrayvec::ArrayVec;
 use wide::{CmpGe as _, CmpLe as _, CmpLt as _, f32x4};
 
 use crate::{
-    bvh::{node_intersector4::BvhNodeIntersector4, simd_ray::SimdRay4x2Interleaved, *},
+    bvh::{node_intersector4x2::BvhNodeIntersector4x2, simd_ray::SimdRay4x2Interleaved, *},
     ray::{Ray4, RayHit4},
     trace_stats::TraceStats,
 };
 
-pub struct BvhIntersector4 {}
+pub struct BvhIntersector4x2 {}
 
-impl BvhIntersector4 {
+impl BvhIntersector4x2 {
     #[must_use]
     pub fn occluded(bvh: &Bvh, ray: &Ray4, stats: &mut TraceStats) -> f32x4 {
         stats.trace_start(ray.valid.move_mask().count_ones() as u64);
@@ -34,7 +34,7 @@ impl BvhIntersector4 {
                 stats.inner_visit(num_valid_rays as u64);
 
                 let (hit_mask_l, hit_mask_r, _, _) =
-                    BvhNodeIntersector4::intersect(child_bbox, &simd_ray);
+                    BvhNodeIntersector4x2::intersect(child_bbox, &simd_ray);
 
                 let hit_l = hit_mask_l & active;
                 let hit_r = hit_mask_r & active;
@@ -93,7 +93,7 @@ impl BvhIntersector4 {
 
                 let mut hits = ArrayVec::<_, 2>::new();
                 let (hit_l, hit_r, near_l, near_r) =
-                    BvhNodeIntersector4::intersect(child_bbox, &simd_ray);
+                    BvhNodeIntersector4x2::intersect(child_bbox, &simd_ray);
 
                 if hit_l.any() {
                     let dist = hit_l.blend(near_l, f32x4::splat(f32::INFINITY));
