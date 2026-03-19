@@ -6,7 +6,7 @@ use wide::{CmpLt, f32x4, f32x8};
 
 use crate::{
     Tile,
-    bvh::{BvhIntersector4, BvhIntersector4x2, BvhIntersector8},
+    bvh::{BvhIntersector4, BvhIntersector8},
     camera::CameraRayGenerator,
     integrators::common::{IntegratorsCommon4, IntegratorsCommon8, SHADOW_RAY_NEAR},
     ray::{Ray4, Ray8, RayHit4, RayHit8},
@@ -155,17 +155,6 @@ tile_integrator_n!(
         RayHit4,
         IntegratorsCommon4,
         BvhIntersector4,
-        sample4
-    ),
-    (
-        TileIntegrator4x2,
-        4,
-        f32x4,
-        Vec3x4,
-        Ray4,
-        RayHit4,
-        IntegratorsCommon4,
-        BvhIntersector4x2,
         sample4
     ),
     (

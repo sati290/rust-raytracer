@@ -137,7 +137,6 @@ fn main() {
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
             TraceMode::SingleRay => TileIntegrator1::integrate,
             TraceMode::Packet4 => TileIntegrator4::integrate,
-            TraceMode::Packet4x2 => TileIntegrator4x2::integrate,
             TraceMode::Packet8 => TileIntegrator8::integrate,
         };
 

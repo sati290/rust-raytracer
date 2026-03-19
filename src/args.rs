@@ -7,7 +7,6 @@ pub enum TraceMode {
     StreamCameraOnly,
     SingleRay,
     Packet4,
-    Packet4x2,
     Packet8,
 }
 
