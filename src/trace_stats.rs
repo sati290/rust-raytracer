@@ -43,6 +43,11 @@ impl TraceStats {
         self.obj_intersect += rays * objects;
     }
 
+    #[inline]
+    pub fn total_rays(&self) -> u64 {
+        self.total_rays
+    }
+
     pub fn print(&self) {
         println!("{:?}", self);
         println!(

@@ -173,6 +173,11 @@ fn main() {
         .fold(TraceStats::new(), |acc, x| acc + x.trace_stats);
     trace_stats.print();
 
+    println!(
+        "{:.2?} MRays/sec",
+        trace_stats.total_rays() as f32 / 1_000_000. / elapsed.as_secs_f32()
+    );
+
     let image = RgbImage::from_fn(image_width, image_height, |x, y| {
         color_vec_to_rgb_norm_gamma(pixels[(y * image_width + x) as usize])
     });
