@@ -4,24 +4,22 @@ use ultraviolet::{Vec3, Vec3x4};
 
 use crate::{aabb::Aabb, bvh::*, mesh::TriangleMesh, triangle_opt::TriangleOpt};
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 struct BvhStats {
     num_leaves: u32,
+    num_objs: u32,
     max_depth: u32,
     max_objs: u32,
 }
 
 impl BvhStats {
     fn new() -> Self {
-        BvhStats {
-            num_leaves: 0,
-            max_depth: 0,
-            max_objs: 0,
-        }
+        Default::default()
     }
 
     fn add_leaf(&mut self, depth: u32, objs: u32) {
         self.num_leaves += 1;
+        self.num_objs += objs;
         self.max_depth = self.max_depth.max(depth);
         self.max_objs = self.max_objs.max(objs);
     }
@@ -39,6 +37,7 @@ impl Add for BvhStats {
 impl AddAssign for BvhStats {
     fn add_assign(&mut self, rhs: Self) {
         self.num_leaves += rhs.num_leaves;
+        self.num_objs += rhs.num_objs;
         self.max_depth = self.max_depth.max(rhs.max_depth);
         self.max_objs = self.max_objs.max(rhs.max_objs);
     }

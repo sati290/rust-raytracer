@@ -114,16 +114,16 @@ fn main() {
         &mut rng,
     );
 
-    println!("mode: {:?}", args.mode);
     println!(
-        "{} {}x{} tiles, {} pixels/tile, {} samples/pixel, {} total samples/tile, max bounces {}",
+        "{} {}x{} tiles, {} pixels/tile, {} samples/pixel, {} total samples/tile, max bounces {}, mode {:?}",
         tiles.len(),
         args.tile_size,
         args.tile_size,
         args.tile_size * args.tile_size,
         args.samples,
         args.tile_size * args.tile_size * args.samples,
-        args.max_bounces
+        args.max_bounces,
+        args.mode
     );
 
     let num_tiles = tiles.len();
@@ -161,12 +161,6 @@ fn main() {
     }
 
     let elapsed = time_start.elapsed();
-    println!(
-        "{:.2?} for {} samples, {:.2} samples/sec",
-        elapsed,
-        args.samples,
-        args.samples as f32 / elapsed.as_secs_f32()
-    );
 
     let trace_stats = tiles
         .iter()
@@ -174,8 +168,14 @@ fn main() {
     trace_stats.print();
 
     println!(
-        "{:.2?} MRays/sec",
-        trace_stats.total_rays() as f32 / 1_000_000. / elapsed.as_secs_f32()
+        "{:.2?} for {} samples/px, {:.2} samples/px/sec, {:.2?} MRays/sec, {:.2?} MSamples/sec",
+        elapsed,
+        args.samples,
+        args.samples as f32 / elapsed.as_secs_f32(),
+        trace_stats.total_rays() as f32 / 1_000_000. / elapsed.as_secs_f32(),
+        (args.tile_size * args.tile_size * args.samples * num_tiles as u32) as f32
+            / 1_000_000.
+            / elapsed.as_secs_f32()
     );
 
     let image = RgbImage::from_fn(image_width, image_height, |x, y| {
