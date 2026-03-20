@@ -42,17 +42,17 @@ macro_rules! tile_integrator_n {
 
                     loop {
                         $intersector::intersect(bvh, &mut ray_hit, trace_stats);
+                        ray_valid &= ray_hit.ray.far.cmp_lt(f32::INFINITY);
+                        if ray_valid.none() {
+                            break;
+                        }
+
                         let mut normal = [Vec3::zero(); $c];
                         for (i, h) in ray_hit.obj_idx.into_iter().enumerate() {
                             if let Some(h) = h {
                                 let hit_obj = mesh.get_triangle(h);
                                 normal[i] = *hit_obj.normal();
                             }
-                        }
-                        ray_valid &= ray_hit.ray.far.cmp_lt(f32::INFINITY);
-
-                        if ray_valid.none() {
-                            break;
                         }
 
                         let hit_pos = ray_hit.ray.hit_pos();
@@ -71,12 +71,10 @@ macro_rules! tile_integrator_n {
                                 &shadow_valid,
                             );
                             let occluded = $intersector::occluded(bvh, &shadow_ray, trace_stats);
-                            let light_valid = (shadow_valid & !occluded).move_mask();
-                            let light_weight: [Vec3; $c] = (weight * shadow_weight).into();
-                            for (i, w) in light_weight.into_iter().enumerate() {
-                                if light_valid & 1 << i != 0 {
-                                    *dest_pixel += Vec4::from(w);
-                                }
+                            let light_valid = shadow_valid & !occluded;
+                            let contrib: [Vec3; $c] = $vt::blend(light_valid, weight * shadow_weight, $vt::zero()).into();
+                            for c in contrib.into_iter() {
+                                *dest_pixel += Vec4::from(c);
                             }
                         }
 

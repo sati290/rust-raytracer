@@ -63,8 +63,7 @@ macro_rules! bvh_intersector_n {
 
                         if let Some(BvhNode::Leaf { triangles_range }) = cur_node {
                             stats.leaf_visit(num_valid_rays as u64, triangles_range.len() as u64);
-                            for obj_idx in triangles_range.clone() {
-                                let obj = &bvh.triangles[obj_idx];
+                            for obj in bvh.triangles[triangles_range.clone()].iter() {
                                 let hit = $triangle_intersector::intersect(obj, &ray.origin, &ray.direction);
                                 let hit_mask = hit.cmp_ge(ray.near) & hit.cmp_lt(ray.far);
                                 active &= !hit_mask;
@@ -126,8 +125,10 @@ macro_rules! bvh_intersector_n {
 
                         if let Some(BvhNode::Leaf { triangles_range }) = cur_node {
                             stats.leaf_visit(num_valid_rays as u64, triangles_range.len() as u64);
-                            for obj_idx in triangles_range.clone() {
-                                let obj = &bvh.triangles[obj_idx];
+                            for (obj, &obj_idx) in bvh.triangles[triangles_range.clone()]
+                                .iter()
+                                .zip(bvh.object_indices[triangles_range.clone()].iter())
+                            {
                                 let hit = $triangle_intersector::intersect(obj, &ray_hit.ray.origin, &ray_hit.ray.direction);
                                 let hit_mask = (hit.cmp_ge(ray_hit.ray.near) & hit.cmp_lt(ray_hit.ray.far))
                                     .move_mask() as u32;
@@ -136,7 +137,7 @@ macro_rules! bvh_intersector_n {
                                 for i in 0..$n {
                                     if hit_mask & 1 << i != 0 {
                                         far[i] = hit[i];
-                                        ray_hit.obj_idx[i] = Some(bvh.object_indices[obj_idx] as u32);
+                                        ray_hit.obj_idx[i] = Some(obj_idx as u32);
                                     }
                                 }
                                 if hit_mask != 0 {

@@ -13,14 +13,20 @@ pub struct TriangleMesh {
 }
 
 impl TriangleMesh {
+    #[must_use]
+    #[inline]
     pub fn num_triangles(&self) -> usize {
         self.indices.len()
     }
 
+    #[must_use]
+    #[inline]
     pub fn _num_vertices(&self) -> usize {
         self.positions.len()
     }
 
+    #[must_use]
+    #[inline]
     pub fn get_triangle(&self, index: u32) -> Triangle<'_> {
         Triangle {
             mesh: self,
@@ -29,6 +35,7 @@ impl TriangleMesh {
         }
     }
 
+    #[must_use]
     pub fn iter(&self) -> Iter<'_> {
         Iter::new(self)
     }
@@ -71,11 +78,15 @@ pub struct Triangle<'a> {
 }
 
 impl Triangle<'_> {
+    #[must_use]
+    #[inline]
     pub fn vertices(&self) -> [&Vec3; 3] {
         self.vtx_indices
             .map(|i| unsafe { self.mesh.positions.get_unchecked(i as usize) })
     }
 
+    #[must_use]
+    #[inline]
     pub fn normal(&self) -> &Vec3 {
         unsafe { self.mesh.geom_normals.get_unchecked(self.index as usize) }
     }
@@ -175,6 +186,7 @@ impl TriangleMeshBuilder {
         self.mesh.geom_normals.push(ng);
     }
 
+    #[must_use]
     pub fn build(self) -> TriangleMesh {
         self.mesh
     }
