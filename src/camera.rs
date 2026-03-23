@@ -1,6 +1,7 @@
-use rand::{Rng, RngExt};
-use ultraviolet::{Vec3, Vec3x4, Vec3x8};
-use wide::{f32x4, f32x8};
+use nalgebra::{Scalar, SimdRealField, SimdValue, Vector3};
+use rand::{Rng, distributions::Standard, prelude::Distribution};
+
+use crate::math::Vec3f;
 
 #[derive(Clone, Copy)]
 pub struct Rect {
@@ -12,19 +13,19 @@ pub struct Rect {
 
 #[derive(Clone)]
 pub struct Camera {
-    eye_pos: Vec3,
-    _target_pos: Vec3,
-    cam_up: Vec3,
+    eye_pos: Vec3f,
+    _target_pos: Vec3f,
+    cam_up: Vec3f,
     horiz_fog_deg: f32,
-    cam_forward: Vec3,
-    cam_right: Vec3,
+    cam_forward: Vec3f,
+    cam_right: Vec3f,
 }
 
 impl Camera {
-    pub fn new(eye_pos: Vec3, target_pos: Vec3, cam_up: Vec3, horiz_fog_deg: f32) -> Self {
-        let cam_forward = (target_pos - eye_pos).normalized();
-        let cam_right = cam_forward.cross(cam_up).normalized();
-        let cam_up = cam_right.cross(cam_forward);
+    pub fn new(eye_pos: Vec3f, target_pos: Vec3f, cam_up: Vec3f, horiz_fog_deg: f32) -> Self {
+        let cam_forward = (target_pos - eye_pos).normalize();
+        let cam_right = cam_forward.cross(&cam_up).normalize();
+        let cam_up = cam_right.cross(&cam_forward);
         Self {
             eye_pos,
             _target_pos: target_pos,
@@ -35,7 +36,7 @@ impl Camera {
         }
     }
 
-    pub fn position(&self) -> Vec3 {
+    pub fn position(&self) -> Vec3f {
         self.eye_pos
     }
 }
@@ -44,10 +45,10 @@ pub struct CameraRayGenerator<'a> {
     camera: &'a Camera,
     region: Rect,
     pixel_size: f32,
-    region_top_left: Vec3,
-    next_pixel_x: Vec3,
-    next_pixel_y: Vec3,
-    current_ray: Vec3,
+    region_top_left: Vec3f,
+    next_pixel_x: Vec3f,
+    next_pixel_y: Vec3f,
+    current_ray: Vec3f,
     current_x: u32,
     current_y: u32,
 }
@@ -111,30 +112,25 @@ impl<'a> CameraRayGenerator<'a> {
         }
     }
 
-    pub fn sample<R: Rng>(&self, rng: &mut R) -> Vec3 {
-        let u: [f32; 2] = rng.random();
+    pub fn sample1(&self, rng: &mut impl Rng) -> Vec3f {
+        let u: [f32; 2] = rng.r#gen();
         let sp_offset = self.pixel_size
             * ((u[0] - 0.5) * self.camera.cam_right + (u[1] - 0.5) * self.camera.cam_up);
-        (self.current_ray + sp_offset).normalized()
+        (self.current_ray + sp_offset).normalize()
     }
 
-    pub fn sample4<R: Rng>(&self, rng: &mut R) -> Vec3x4 {
-        let sp_x = f32x4::from(rng.random::<[f32; 4]>());
-        let sp_y = f32x4::from(rng.random::<[f32; 4]>());
+    pub fn sample<T>(&self, rng: &mut impl Rng) -> Vector3<T>
+    where
+        T: Scalar + SimdRealField<Element = f32>,
+        Standard: Distribution<T>,
+    {
+        let sp_x = rng.r#gen::<T>();
+        let sp_y = rng.r#gen::<T>();
 
-        let sp_offset = f32x4::splat(self.pixel_size)
-            * ((sp_x - f32x4::HALF) * Vec3x4::splat(self.camera.cam_right)
-                + (sp_y - f32x4::HALF) * Vec3x4::splat(self.camera.cam_up));
-        (Vec3x4::splat(self.current_ray) + sp_offset).normalized()
-    }
-
-    pub fn sample8<R: Rng>(&self, rng: &mut R) -> Vec3x8 {
-        let sp_x = f32x8::from(rng.random::<[f32; 8]>());
-        let sp_y = f32x8::from(rng.random::<[f32; 8]>());
-
-        let sp_offset = f32x8::splat(self.pixel_size)
-            * ((sp_x - f32x8::HALF) * Vec3x8::splat(self.camera.cam_right)
-                + (sp_y - f32x8::HALF) * Vec3x8::splat(self.camera.cam_up));
-        (Vec3x8::splat(self.current_ray) + sp_offset).normalized()
+        let cam_right = Vector3::<T>::splat(self.camera.cam_right);
+        let cam_up = Vector3::<T>::splat(self.camera.cam_up);
+        let sp_offset = (cam_right * (sp_x - T::splat(0.5)) + cam_up * (sp_y - T::splat(0.5)))
+            * T::splat(self.pixel_size);
+        (Vector3::<T>::splat(self.current_ray) + sp_offset).normalize()
     }
 }

@@ -1,7 +1,6 @@
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
-use ultraviolet::Vec3x4;
 
 use crate::{bvh::*, ray::StreamRay, trace_stats::TraceStats};
 
@@ -50,9 +49,9 @@ impl Bvh {
 
                     let neg_mask = set_splat_m256(-0.);
                     let pos_neg_mask = m256::from([0., 0., -0., -0., 0., 0., -0., -0.]);
-                    let bb_min_max_x = load_m128_splat_m256(&m128::from(child_bbox.x.to_array()));
-                    let bb_min_max_y = load_m128_splat_m256(&m128::from(child_bbox.y.to_array()));
-                    let bb_min_max_z = load_m128_splat_m256(&m128::from(child_bbox.z.to_array()));
+                    let bb_min_max_x = load_m128_splat_m256(&m128::from_array(child_bbox.x.into()));
+                    let bb_min_max_y = load_m128_splat_m256(&m128::from_array(child_bbox.y.into()));
+                    let bb_min_max_z = load_m128_splat_m256(&m128::from_array(child_bbox.z.into()));
 
                     let bb_max_min_x =
                         shuffle_m256::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x) ^ pos_neg_mask;
@@ -74,15 +73,15 @@ impl Bvh {
                         };
 
                         let origin_xyz_far_ab = set_m128_m256(
-                            m128::from(*rays[ray_idx_b].origin_far.as_array()),
-                            m128::from(*rays[ray_idx_a].origin_far.as_array()),
+                            m128::from_array(rays[ray_idx_b].origin_far.into()),
+                            m128::from_array(rays[ray_idx_a].origin_far.into()),
                         );
 
                         let origin_xyz_far_ab_neg = origin_xyz_far_ab ^ neg_mask;
 
                         let dir_recip_xyz_near_ab = set_m128_m256(
-                            m128::from(*rays[ray_idx_b].direction_recip_near.as_array()),
-                            m128::from(*rays[ray_idx_a].direction_recip_near.as_array()),
+                            m128::from_array(rays[ray_idx_b].direction_recip_near.into()),
+                            m128::from_array(rays[ray_idx_a].direction_recip_near.into()),
                         );
 
                         let origin_x =
@@ -198,7 +197,12 @@ impl Bvh {
         }
     }
 
-    pub fn occluded_stream(&self, rays: &mut [StreamRay], occluded: &mut [bool], stats: &mut TraceStats) {
+    pub fn occluded_stream(
+        &self,
+        rays: &mut [StreamRay],
+        occluded: &mut [bool],
+        stats: &mut TraceStats,
+    ) {
         assert!(rays.len() <= RayIdx::MAX as usize);
         use safe_arch::*;
 
@@ -234,9 +238,9 @@ impl Bvh {
 
                     let neg_mask = set_splat_m256(-0.);
                     let pos_neg_mask = m256::from([0., 0., -0., -0., 0., 0., -0., -0.]);
-                    let bb_min_max_x = load_m128_splat_m256(&m128::from(child_bbox.x.to_array()));
-                    let bb_min_max_y = load_m128_splat_m256(&m128::from(child_bbox.y.to_array()));
-                    let bb_min_max_z = load_m128_splat_m256(&m128::from(child_bbox.z.to_array()));
+                    let bb_min_max_x = load_m128_splat_m256(&m128::from_array(child_bbox.x.into()));
+                    let bb_min_max_y = load_m128_splat_m256(&m128::from_array(child_bbox.y.into()));
+                    let bb_min_max_z = load_m128_splat_m256(&m128::from_array(child_bbox.z.into()));
 
                     let bb_max_min_x =
                         shuffle_m256::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x) ^ pos_neg_mask;
@@ -263,15 +267,15 @@ impl Bvh {
                         };
 
                         let origin_xyz_far_ab = set_m128_m256(
-                            m128::from(*rays[ray_idx_b].origin_far.as_array()),
-                            m128::from(*rays[ray_idx_a].origin_far.as_array()),
+                            m128::from_array(rays[ray_idx_b].origin_far.into()),
+                            m128::from_array(rays[ray_idx_a].origin_far.into()),
                         );
 
                         let origin_xyz_far_ab_neg = origin_xyz_far_ab ^ neg_mask;
 
                         let dir_recip_xyz_near_ab = set_m128_m256(
-                            m128::from(*rays[ray_idx_b].direction_recip_near.as_array()),
-                            m128::from(*rays[ray_idx_a].direction_recip_near.as_array()),
+                            m128::from_array(rays[ray_idx_b].direction_recip_near.into()),
+                            m128::from_array(rays[ray_idx_a].direction_recip_near.into()),
                         );
 
                         let origin_x =
@@ -391,13 +395,13 @@ impl Bvh {
                 *ray_chunk_indices.get(2).unwrap_or(&ray_chunk_indices[0]) as usize,
                 *ray_chunk_indices.get(3).unwrap_or(&ray_chunk_indices[0]) as usize,
             ];
-            let ray_origins = Vec3x4::from([
+            let ray_origins = Vec3x4f::from([
                 rays[ray_indices_padded[0]].origin_far.xyz(),
                 rays[ray_indices_padded[1]].origin_far.xyz(),
                 rays[ray_indices_padded[2]].origin_far.xyz(),
                 rays[ray_indices_padded[3]].origin_far.xyz(),
             ]);
-            let ray_directions = Vec3x4::from([
+            let ray_directions = Vec3x4f::from([
                 rays[ray_indices_padded[0]].direction.xyz(),
                 rays[ray_indices_padded[1]].direction.xyz(),
                 rays[ray_indices_padded[2]].direction.xyz(),
@@ -435,13 +439,13 @@ impl Bvh {
                 *ray_chunk_indices.get(2).unwrap_or(&ray_chunk_indices[0]) as usize,
                 *ray_chunk_indices.get(3).unwrap_or(&ray_chunk_indices[0]) as usize,
             ];
-            let ray_origins = Vec3x4::from([
+            let ray_origins = Vec3x4f::from([
                 rays[ray_indices_padded[0]].origin_far.xyz(),
                 rays[ray_indices_padded[1]].origin_far.xyz(),
                 rays[ray_indices_padded[2]].origin_far.xyz(),
                 rays[ray_indices_padded[3]].origin_far.xyz(),
             ]);
-            let ray_directions = Vec3x4::from([
+            let ray_directions = Vec3x4f::from([
                 rays[ray_indices_padded[0]].direction.xyz(),
                 rays[ray_indices_padded[1]].direction.xyz(),
                 rays[ray_indices_padded[2]].direction.xyz(),

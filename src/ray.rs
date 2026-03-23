@@ -1,23 +1,25 @@
-use ultraviolet::{Vec3, Vec3x4, Vec3x8, Vec4};
-use wide::{f32x4, f32x8};
+use hybrid_array::Array;
+use nalgebra::{SimdBool, SimdRealField, Vector3};
+
+use crate::math::{SimdType, Vec3f, Vec4f};
 
 #[derive(Clone)]
 #[repr(C, align(16))]
 pub struct StreamRay {
-    pub origin_far: Vec4,           // x, y, z, near
-    pub direction_recip_near: Vec4, // x, y, z, far
-    pub direction: Vec4,
+    pub origin_far: Vec4f,           // x, y, z, near
+    pub direction_recip_near: Vec4f, // x, y, z, far
+    pub direction: Vec4f,
 }
 
 impl StreamRay {
     #[must_use]
     #[inline]
-    pub fn new(origin: &Vec3, direction: &Vec3, near: f32, far: f32) -> Self {
-        let dir_recip = Vec3::one() / *direction;
+    pub fn new(origin: &Vec3f, direction: &Vec3f, near: f32, far: f32) -> Self {
+        let dir_recip = Vec3f::from_element(1.).component_div(direction);
         StreamRay {
-            origin_far: Vec4::new(origin.x, origin.y, origin.z, far),
-            direction: Vec4::from(*direction),
-            direction_recip_near: Vec4::new(dir_recip.x, dir_recip.y, dir_recip.z, near),
+            origin_far: Vec4f::new(origin.x, origin.y, origin.z, far),
+            direction: Vec4f::new(direction.x, direction.y, direction.z, 0.),
+            direction_recip_near: Vec4f::new(dir_recip.x, dir_recip.y, dir_recip.z, near),
         }
     }
 
@@ -35,75 +37,76 @@ impl StreamRay {
 
     #[must_use]
     #[inline]
-    pub fn hit_pos(&self) -> Vec3 {
+    pub fn hit_pos(&self) -> Vec3f {
         self.origin_far.xyz() + self.direction.xyz() * self.hit_dist()
     }
 }
 
-macro_rules! ray_n {
-    ($(($n:ident, $nh:ident, $c:literal, $t:ident, $vt:ident)),+) => {
-        $(
-            #[derive(Clone)]
-            pub struct $n {
-                pub origin: $vt,
-                pub direction: $vt,
-                pub near: $t,
-                pub far: $t,
-                pub valid: $t,
-            }
+#[derive(Clone)]
+pub struct Ray<T>
+where
+    T: SimdRealField,
+{
+    pub origin: Vector3<T>,
+    pub direction: Vector3<T>,
+    pub near: T,
+    pub far: T,
+    pub valid: T::SimdBool,
+}
 
-            impl $n {
-                #[must_use]
-                #[inline]
-                pub fn new(
-                    origin: &$vt,
-                    direction: &$vt,
-                    near: &$t,
-                    far: &$t,
-                    valid: &$t,
-                ) -> Self {
-                    $n {
-                        origin: *origin,
-                        direction: *direction,
-                        near: valid.blend(*near, $t::splat(f32::INFINITY)),
-                        far: valid.blend(*far, $t::splat(f32::NEG_INFINITY)),
-                        valid: *valid,
-                    }
-                }
+impl<T> Ray<T>
+where
+    T: SimdRealField<Element = f32> + Copy,
+{
+    #[must_use]
+    #[inline]
+    pub fn new(
+        origin: &Vector3<T>,
+        direction: &Vector3<T>,
+        near: &T,
+        far: &T,
+        valid: &T::SimdBool,
+    ) -> Self {
+        Self {
+            origin: *origin,
+            direction: *direction,
+            near: valid.if_else(|| *near, || T::splat(f32::INFINITY)),
+            far: valid.if_else(|| *far, || T::splat(f32::NEG_INFINITY)),
+            valid: *valid,
+        }
+    }
 
-                #[must_use]
-                #[inline]
-                pub fn hit_dist(&self) -> $t {
-                    self.far
-                }
+    #[must_use]
+    #[inline]
+    pub fn hit_dist(&self) -> T {
+        self.far
+    }
 
-                #[must_use]
-                #[inline]
-                pub fn hit_pos(&self) -> $vt {
-                    self.origin + self.direction * self.hit_dist()
-                }
-            }
-
-            #[derive(Clone)]
-            pub struct $nh {
-                pub ray: $n,
-                pub obj_idx: [Option<u32>; $c],
-            }
-
-            impl From<$n> for $nh {
-                #[inline]
-                fn from(ray: $n) -> Self {
-                    $nh {
-                        ray,
-                        obj_idx: [None; _],
-                    }
-                }
-            }
-        )+
+    #[must_use]
+    #[inline]
+    pub fn hit_pos(&self) -> Vector3<T> {
+        self.origin + self.direction * self.hit_dist()
     }
 }
 
-ray_n!(
-    (Ray4, RayHit4, 4, f32x4, Vec3x4),
-    (Ray8, RayHit8, 8, f32x8, Vec3x8)
-);
+#[derive(Clone)]
+pub struct RayHit<T>
+where
+    T: SimdRealField + SimdType,
+{
+    pub ray: Ray<T>,
+    pub obj_idx: Array<Option<u32>, T::Lanes>,
+}
+
+impl<T> From<Ray<T>> for RayHit<T>
+where
+    T: SimdRealField + SimdType,
+{
+    #[inline]
+    fn from(ray: Ray<T>) -> Self {
+        Self {
+            ray,
+            obj_idx: Default::default(),
+        }
+    }
+}

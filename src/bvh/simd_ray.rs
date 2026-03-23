@@ -1,42 +1,47 @@
 use safe_arch::*;
+use simba::simd::{WideF32x4, WideF32x8};
 
-use crate::ray::{Ray4, Ray8};
+use crate::ray::Ray;
+
+pub trait SimdRay<T>: for<'a> From<&'a Ray<T>> {
+    fn update_far(&mut self, far: &T);
+}
 
 macro_rules! simd_ray_n {
-    ($(($name:ident, $n:literal, $t:ident, $ray:ident, $splat:ident)),+) => {
+    ($(($name:ident, $n:literal, $st:ident, $t:ty, $splat:ident)),+) => {
         $(
             pub struct $name {
-                pub dir_recip_x: $t,
-                pub dir_recip_y: $t,
-                pub dir_recip_z: $t,
-                pub origin_dir_recip_x: $t,
-                pub origin_dir_recip_y: $t,
-                pub origin_dir_recip_z: $t,
-                pub near: $t,
-                pub far: $t,
+                pub dir_recip_x: $st,
+                pub dir_recip_y: $st,
+                pub dir_recip_z: $st,
+                pub origin_dir_recip_x: $st,
+                pub origin_dir_recip_y: $st,
+                pub origin_dir_recip_z: $st,
+                pub near: $st,
+                pub far: $st,
             }
 
-            impl $name {
+            impl SimdRay<$t> for $name {
                 #[inline]
-                pub fn update_far(&mut self, far: &[f32; $n]) {
-                    self.far = $t::from(*far);
+                fn update_far(&mut self, far: &$t) {
+                    self.far = $st::from(far.into_arr());
                 }
             }
 
-            impl From<&$ray> for $name {
+            impl From<&Ray<$t>> for $name {
                 #[inline]
-                fn from(ray: &$ray) -> Self {
+                fn from(ray: &Ray<$t>) -> Self {
                     use safe_arch::*;
 
-                    let origin_x = $t::from(ray.origin.x.to_array());
-                    let origin_y = $t::from(ray.origin.y.to_array());
-                    let origin_z = $t::from(ray.origin.z.to_array());
-                    let near = $t::from(ray.near.to_array());
-                    let far = $t::from(ray.far.to_array());
+                    let origin_x = $st::from_array(ray.origin.x.into());
+                    let origin_y = $st::from_array(ray.origin.y.into());
+                    let origin_z = $st::from_array(ray.origin.z.into());
+                    let near = $st::from_array(ray.near.into());
+                    let far = $st::from_array(ray.far.into());
 
-                    let dir_x = $t::from(ray.direction.x.to_array());
-                    let dir_y = $t::from(ray.direction.y.to_array());
-                    let dir_z = $t::from(ray.direction.z.to_array());
+                    let dir_x = $st::from_array(ray.direction.x.into());
+                    let dir_y = $st::from_array(ray.direction.y.into());
+                    let dir_z = $st::from_array(ray.direction.z.into());
 
                     let one = $splat(1.);
                     let dir_recip_x = one / dir_x;
@@ -64,6 +69,6 @@ macro_rules! simd_ray_n {
 }
 
 simd_ray_n!(
-    (SimdRay4, 4, m128, Ray4, set_splat_m128),
-    (SimdRay8, 8, m256, Ray8, set_splat_m256)
+    (SimdRay4, 4, m128, WideF32x4, set_splat_m128),
+    (SimdRay8, 8, m256, WideF32x8, set_splat_m256)
 );

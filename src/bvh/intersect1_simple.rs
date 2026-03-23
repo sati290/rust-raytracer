@@ -1,5 +1,5 @@
 use arrayvec::ArrayVec;
-use ultraviolet::Vec3;
+use nalgebra::SimdValue;
 
 use crate::{aabb::Aabb, bvh::*, ray::StreamRay, trace_stats::TraceStats};
 
@@ -18,14 +18,13 @@ impl Bvh {
                 } => {
                     stats.inner_visit(1);
 
-                    let bb: [Vec3; 4] = (*child_bbox).into();
                     let bb_l = Aabb {
-                        min: bb[0],
-                        max: bb[2],
+                        min: child_bbox.extract(0),
+                        max: child_bbox.extract(2),
                     };
                     let bb_r = Aabb {
-                        min: bb[1],
-                        max: bb[3],
+                        min: child_bbox.extract(1),
+                        max: child_bbox.extract(3),
                     };
 
                     if bb_l._intersect(&ray.origin_far.xyz(), &ray.direction_recip_near.xyz()) {

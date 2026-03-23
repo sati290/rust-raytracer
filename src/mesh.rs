@@ -1,15 +1,17 @@
 use std::{collections::HashMap, hash::Hash, iter::Enumerate};
 
-use crate::aabb::Aabb;
-use ultraviolet::{Vec2, Vec3};
+use crate::{
+    aabb::Aabb,
+    math::{Vec2f, Vec3f},
+};
 
 #[derive(Default)]
 pub struct TriangleMesh {
-    positions: Vec<Vec3>,
-    texcoords: Vec<Vec2>,
-    normals: Vec<Vec3>,
+    positions: Vec<Vec3f>,
+    texcoords: Vec<Vec2f>,
+    normals: Vec<Vec3f>,
     indices: Vec<[u32; 3]>,
-    geom_normals: Vec<Vec3>,
+    geom_normals: Vec<Vec3f>,
 }
 
 impl TriangleMesh {
@@ -80,14 +82,14 @@ pub struct Triangle<'a> {
 impl Triangle<'_> {
     #[must_use]
     #[inline]
-    pub fn vertices(&self) -> [&Vec3; 3] {
+    pub fn vertices(&self) -> [&Vec3f; 3] {
         self.vtx_indices
             .map(|i| unsafe { self.mesh.positions.get_unchecked(i as usize) })
     }
 
     #[must_use]
     #[inline]
-    pub fn normal(&self) -> &Vec3 {
+    pub fn normal(&self) -> &Vec3f {
         unsafe { self.mesh.geom_normals.get_unchecked(self.index as usize) }
     }
 
@@ -102,7 +104,7 @@ impl Triangle<'_> {
     }
 
     #[must_use]
-    pub fn centroid(&self) -> Vec3 {
+    pub fn centroid(&self) -> Vec3f {
         let verts = self.vertices();
         (*verts[0] + *verts[1] + *verts[2]) / 3.
     }
@@ -114,7 +116,7 @@ struct VertexKey {
 }
 
 impl VertexKey {
-    pub fn new(p: &Vec3, t: &Vec2, n: &Vec3) -> Self {
+    pub fn new(p: &Vec3f, t: &Vec2f, n: &Vec3f) -> Self {
         VertexKey {
             data: [
                 p.x.to_bits(),
@@ -155,9 +157,9 @@ impl TriangleMeshBuilder {
 
     pub fn add_triangle(
         &mut self,
-        positions: &[Vec3; 3],
-        texcoords: &[Vec2; 3],
-        normals: &[Vec3; 3],
+        positions: &[Vec3f; 3],
+        texcoords: &[Vec2f; 3],
+        normals: &[Vec3f; 3],
     ) {
         let indices = [0, 1, 2].map(|i| {
             let p = &positions[i];
@@ -175,10 +177,10 @@ impl TriangleMeshBuilder {
             })
         });
 
-        let mut ng = (positions[1] - positions[0])
-            .cross(positions[2] - positions[0])
-            .normalized();
-        if ng.dot(normals[0]) < 0. {
+        let v0v1 = positions[1] - positions[0];
+        let v0v2 = positions[2] - positions[0];
+        let mut ng = (v0v1).cross(&v0v2).normalize();
+        if ng.dot(&normals[0]) < 0. {
             ng = -ng;
         }
 

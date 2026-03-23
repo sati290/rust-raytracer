@@ -1,21 +1,24 @@
-use ultraviolet::{Vec3, Vec3x4};
-use wide::{CmpGe, CmpLe, f32x4};
+use nalgebra::{SimdBool, SimdPartialOrd, SimdValue};
+use simba::simd::{SimdSigned, WideF32x4};
 
-use crate::mesh::Triangle;
+use crate::{
+    math::{Vec3f, Vec3x4f},
+    mesh::Triangle,
+};
 
 // Triangle optimized for intersection tests
 pub struct TriangleOpt {
-    pub v0v1: Vec3,
-    pub v0v2: Vec3,
-    pub v0: Vec3,
+    pub v0v1: Vec3f,
+    pub v0v2: Vec3f,
+    pub v0: Vec3f,
 }
 
 impl TriangleOpt {
     #[must_use]
     #[inline]
-    pub fn intersect(&self, ray_origin: &Vec3, ray_direction: &Vec3) -> f32 {
-        let pvec = ray_direction.cross(self.v0v1);
-        let det = self.v0v2.dot(pvec);
+    pub fn intersect(&self, ray_origin: &Vec3f, ray_direction: &Vec3f) -> f32 {
+        let pvec = ray_direction.cross(&self.v0v1);
+        let det = self.v0v2.dot(&pvec);
 
         if det.abs() < f32::EPSILON {
             return f32::INFINITY;
@@ -24,45 +27,45 @@ impl TriangleOpt {
         let inv_det = 1. / det;
 
         let tvec = *ray_origin - self.v0;
-        let u = tvec.dot(pvec) * inv_det;
+        let u = tvec.dot(&pvec) * inv_det;
         if !(0. ..=1.).contains(&u) {
             return f32::INFINITY;
         }
 
-        let qvec = tvec.cross(self.v0v2);
-        let v = ray_direction.dot(qvec) * inv_det;
+        let qvec = tvec.cross(&self.v0v2);
+        let v = ray_direction.dot(&qvec) * inv_det;
         if v < 0. || u + v > 1. {
             return f32::INFINITY;
         }
 
-        self.v0v1.dot(qvec) * inv_det
+        self.v0v1.dot(&qvec) * inv_det
     }
 
     #[must_use]
     #[inline]
-    pub fn intersect_simd(&self, ray_origin: &Vec3x4, ray_direction: &Vec3x4) -> f32x4 {
-        let v0v1 = Vec3x4::splat(self.v0v1);
-        let v0v2 = Vec3x4::splat(self.v0v2);
-        let pvec = ray_direction.cross(v0v1);
-        let det = v0v2.dot(pvec);
+    pub fn intersect_simd(&self, ray_origin: &Vec3x4f, ray_direction: &Vec3x4f) -> WideF32x4 {
+        let v0v1 = Vec3x4f::splat(self.v0v1);
+        let v0v2 = Vec3x4f::splat(self.v0v2);
+        let pvec = ray_direction.cross(&v0v1);
+        let det = v0v2.dot(&pvec);
 
-        let epsilon = f32x4::splat(f32::EPSILON);
-        let det_valid = det.abs().cmp_ge(epsilon);
+        let epsilon = WideF32x4::splat(f32::EPSILON);
+        let det_valid = det.simd_abs().simd_ge(epsilon);
 
-        let inv_det = 1. / det;
+        let inv_det = WideF32x4::ONE / det;
 
-        let tvec = *ray_origin - Vec3x4::splat(self.v0);
-        let u = tvec.dot(pvec) * inv_det;
-        let u_valid = u.cmp_ge(0.) & u.cmp_le(1.);
+        let tvec = *ray_origin - Vec3x4f::splat(self.v0);
+        let u = tvec.dot(&pvec) * inv_det;
+        let u_valid = u.simd_ge(WideF32x4::ZERO) & u.simd_le(WideF32x4::ONE);
 
-        let qvec = tvec.cross(v0v2);
-        let v = ray_direction.dot(qvec) * inv_det;
-        let v_valid = v.cmp_ge(0.) & (u + v).cmp_le(1.);
+        let qvec = tvec.cross(&v0v2);
+        let v = ray_direction.dot(&qvec) * inv_det;
+        let v_valid = v.simd_ge(WideF32x4::ZERO) & (u + v).simd_le(WideF32x4::ONE);
 
-        let t = v0v1.dot(qvec) * inv_det;
+        let t = v0v1.dot(&qvec) * inv_det;
 
         let t_valid = det_valid & u_valid & v_valid;
-        t_valid.blend(t, f32x4::splat(f32::INFINITY))
+        t_valid.if_else(|| t, || WideF32x4::splat(f32::INFINITY))
     }
 }
 

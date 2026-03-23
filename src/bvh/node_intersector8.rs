@@ -1,19 +1,23 @@
 use safe_arch::*;
-use ultraviolet::Vec3x4;
-use wide::f32x8;
+use simba::simd::{WideBoolF32x8, WideF32x8};
 
-use crate::bvh::simd_ray::SimdRay8;
+use crate::{
+    bvh::{node_intersector::BvhNodeIntersector, simd_ray::SimdRay8},
+    math::Vec3x4f,
+};
 
 pub struct BvhNodeIntersector8 {}
 
-impl BvhNodeIntersector8 {
+impl BvhNodeIntersector<WideF32x8> for BvhNodeIntersector8 {
+    type SimdRay = SimdRay8;
+
     #[inline(always)]
-    pub fn intersect(child_bbox: &Vec3x4, index: usize, ray: &SimdRay8) -> (f32x8, f32x8) {
+    fn intersect(child_bbox: &Vec3x4f, index: usize, ray: &SimdRay8) -> (WideBoolF32x8, WideF32x8) {
         // R1   R2   R3   R4   R5   R6   R7   R8
         // MINL MINR MAXL MAXR
-        let bbx = child_bbox.x.as_array_ref();
-        let bby = child_bbox.y.as_array_ref();
-        let bbz = child_bbox.z.as_array_ref();
+        let bbx = child_bbox.x.into_arr();
+        let bby = child_bbox.y.into_arr();
+        let bbz = child_bbox.z.into_arr();
 
         let bb_min_x = set_splat_m256(bbx[index]);
         let bb_min_y = set_splat_m256(bby[index]);
@@ -45,6 +49,9 @@ impl BvhNodeIntersector8 {
             min_m256(tfar, ray.far),
         );
 
-        (hit.to_array().into(), tnear.to_array().into())
+        (
+            WideBoolF32x8::from_arr(hit.to_array()),
+            tnear.to_array().into(),
+        )
     }
 }

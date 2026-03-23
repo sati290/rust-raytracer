@@ -1,10 +1,12 @@
+use nalgebra::SimdValue;
 use rand::Rng;
-use ultraviolet::{Vec3, Vec4};
+use simba::simd::WideF32x8;
 
 use crate::{
     Tile,
     camera::{Camera, CameraRayGenerator, Rect},
     integrators::common::*,
+    math::{Vec3f, Vec4f},
     ray::StreamRay,
     scene::Scene,
 };
@@ -21,11 +23,16 @@ pub fn generate_rays<R: Rng>(
     let mut generator = CameraRayGenerator::new(camera, viewport_size.0, viewport_size.1, *region);
     while !generator.is_done() {
         for _ in 0..samples / 8 {
-            let dirs: [Vec3; 8] = generator.sample8(rng).into();
-            for d in dirs {
-                rays.push(StreamRay::new(&camera.position(), &d, 0., f32::INFINITY));
+            let dirs = generator.sample::<WideF32x8>(rng);
+            for d in 0..8 {
+                rays.push(StreamRay::new(
+                    &camera.position(),
+                    &dirs.extract(d),
+                    0.,
+                    f32::INFINITY,
+                ));
                 path_infos.push(PathInfo {
-                    weight: Vec3::one(),
+                    weight: Vec3f::from_element(1.),
                     destination_idx: generator.current_pixel_idx(),
                     bounces: 0,
                 });
@@ -33,10 +40,10 @@ pub fn generate_rays<R: Rng>(
         }
 
         for _ in 0..samples % 8 {
-            let dir = generator.sample(rng);
+            let dir = generator.sample1(rng);
             rays.push(StreamRay::new(&camera.position(), &dir, 0., f32::INFINITY));
             path_infos.push(PathInfo {
-                weight: Vec3::one(),
+                weight: Vec3f::from_element(1.),
                 destination_idx: generator.current_pixel_idx(),
                 bounces: 0,
             });
@@ -114,7 +121,7 @@ pub fn integrate_tile_stream<R: Rng>(
                         shadow_far,
                     ));
                     shadow_ray_infos.push(PathInfo {
-                        weight: path_info.weight * shadow_weight,
+                        weight: path_info.weight.component_mul(&shadow_weight),
                         ..*path_info
                     });
                 }
@@ -144,8 +151,12 @@ pub fn integrate_tile_stream<R: Rng>(
 
             for (occluded, path_info) in shadow_rays_occluded.iter().zip(shadow_ray_infos.iter()) {
                 if !occluded {
-                    *tile.pixels[path_info.destination_idx as usize] +=
-                        Vec4::from(path_info.weight);
+                    *tile.pixels[path_info.destination_idx as usize] += Vec4f::new(
+                        path_info.weight.x,
+                        path_info.weight.y,
+                        path_info.weight.z,
+                        0.,
+                    );
                 }
             }
         }
@@ -208,8 +219,9 @@ pub fn integrate_tile_stream_shadow_immediate<R: Rng>(
                     let shadow_ray =
                         StreamRay::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
                     if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
+                        let contrib = path_info.weight.component_mul(&shadow_weight);
                         *tile.pixels[path_info.destination_idx as usize] +=
-                            Vec4::from(path_info.weight * shadow_weight);
+                            Vec4f::new(contrib.x, contrib.y, contrib.z, 0.);
                     }
                 }
 
@@ -286,8 +298,9 @@ pub fn integrate_stream_camera_only<R: Rng>(
                 let shadow_ray =
                     StreamRay::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
                 if !bvh.occluded1(&shadow_ray, &mut tile.trace_stats) {
+                    let contrib = path_info.weight.component_mul(&shadow_weight);
                     *tile.pixels[path_info.destination_idx as usize] +=
-                        Vec4::from(path_info.weight * shadow_weight);
+                        Vec4f::new(contrib.x, contrib.y, contrib.z, 0.);
                 }
             }
 

@@ -5,44 +5,44 @@ mod bvh;
 mod camera;
 mod integrators;
 mod light;
+mod math;
 mod mesh;
 mod ray;
 mod scene;
 mod trace_stats;
 mod triangle_intersector;
 mod triangle_opt;
-mod utils;
 
 use crate::args::{Args, TraceMode};
 use crate::camera::Rect;
 use crate::integrators::*;
+use crate::math::{Vec3f, Vec4f};
 use crate::scene::load_scene;
 use crate::trace_stats::TraceStats;
 use chrono::Local;
 use clap::Parser as _;
 use core::f32;
 use image::RgbImage;
-use rand::rngs::SmallRng;
+use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
+use simba::simd::{WideF32x4, WideF32x8};
 use std::fs;
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
-use ultraviolet::{Vec3, Vec3x4, Vec4};
-use wide::{CmpGe, f32x4};
 
-fn linear_to_gamma(v: Vec3) -> Vec3 {
+fn linear_to_gamma(v: Vec3f) -> Vec3f {
     v.map(|f| f.sqrt())
 }
 
-fn color_vec_to_rgb_norm_gamma(v: Vec4) -> image::Rgb<u8> {
+fn color_vec_to_rgb_norm_gamma(v: Vec4f) -> image::Rgb<u8> {
     let v = linear_to_gamma(v.xyz() / v.w) * 255.;
     image::Rgb([v.x as u8, v.y as u8, v.z as u8])
 }
 
 struct Tile<'a, R: Rng> {
     region: Rect,
-    pixels: Vec<&'a mut Vec4>,
+    pixels: Vec<&'a mut Vec4f>,
     rng: R,
     trace_stats: TraceStats,
 }
@@ -59,12 +59,12 @@ impl<R: Rng> Tile<'_, R> {
 }
 
 fn generate_tiles<'a, R: Rng>(
-    pixels: &'a mut [Vec4],
+    pixels: &'a mut [Vec4f],
     image_width: u32,
     image_height: u32,
     tile_size: u32,
     rng: &mut R,
-) -> Vec<Tile<'a, SmallRng>> {
+) -> Vec<Tile<'a, StdRng>> {
     let num_regions_x = image_width.div_ceil(tile_size);
     let num_regions_y = image_height.div_ceil(tile_size);
 
@@ -81,7 +81,7 @@ fn generate_tiles<'a, R: Rng>(
                 width,
                 height,
             };
-            batches.push(Tile::new(rect, SmallRng::from_rng(rng)));
+            batches.push(Tile::new(rect, StdRng::from_rng(&mut *rng).unwrap()));
         }
     }
 
@@ -104,8 +104,8 @@ fn main() {
     let image_height = 1080;
     let scene = load_scene(args.scene);
 
-    let mut rng = SmallRng::seed_from_u64(args.seed);
-    let mut pixels = vec![Vec4::zero(); (image_width * image_height) as usize];
+    let mut rng = StdRng::seed_from_u64(args.seed);
+    let mut pixels = vec![Vec4f::zeros(); (image_width * image_height) as usize];
     let mut tiles = generate_tiles(
         &mut pixels,
         image_width,
@@ -136,8 +136,8 @@ fn main() {
             TraceMode::StreamShadowImmediate => integrate_tile_stream_shadow_immediate,
             TraceMode::StreamCameraOnly => integrate_stream_camera_only,
             TraceMode::SingleRay => TileIntegrator1::integrate,
-            TraceMode::Packet4 => TileIntegrator4::integrate,
-            TraceMode::Packet8 => TileIntegrator8::integrate,
+            TraceMode::Packet4 => TileIntegrator::<WideF32x4>::integrate,
+            TraceMode::Packet8 => TileIntegrator::<WideF32x8>::integrate,
         };
 
         trace_fn(

@@ -8,14 +8,16 @@ edition = "2024"
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 rayon = "1.5"
-ultraviolet = "0.10"
 wide = "0.7"
-rand = "0.10"
+rand = "0.8"
 obj = "0.10"
 arrayvec = "0.7"
 safe_arch = "1.0"
 chrono = "0.4.43"
 clap = { version = "4.5.60", features = ["derive"] }
+nalgebra = "0.34.1"
+simba = { version = "0.9.1", features = ["rand", "wide"] }
+hybrid-array = "0.4.8"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

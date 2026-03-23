@@ -1,19 +1,19 @@
 use std::time::Instant;
 
 use obj::Obj;
-use ultraviolet::{Mat3, Vec2, Vec3};
 
 use crate::{
     args,
     bvh::Bvh,
     camera::Camera,
     light::PointLight,
+    math::{Mat3f, Vec2f, Vec3f},
     mesh::{TriangleMesh, TriangleMeshBuilder},
 };
 
 pub struct SceneDefinition {
     obj_path: String,
-    transform: Mat3,
+    transform: Mat3f,
     camera: Camera,
     light: PointLight,
 }
@@ -43,16 +43,16 @@ impl Scene {
                     for i in 0..(p.0.len() - 2) {
                         let indices = [0, i + 1, i + 2];
                         let positions = indices
-                            .map(|i| def.transform * Vec3::from(obj.data.position[p.0[i].0]));
+                            .map(|i| def.transform * Vec3f::from(obj.data.position[p.0[i].0]));
                         let texcoords =
-                            indices.map(|i| Vec2::from(obj.data.texture[p.0[i].1.unwrap()]));
+                            indices.map(|i| Vec2f::from(obj.data.texture[p.0[i].1.unwrap()]));
                         let normals = indices.map(|i| {
-                            def.transform * Vec3::from(obj.data.normal[p.0[i].2.unwrap()])
+                            def.transform * Vec3f::from(obj.data.normal[p.0[i].2.unwrap()])
                         });
 
                         let v0v1 = positions[1] - positions[0];
                         let v0v2 = positions[2] - positions[0];
-                        let magsq = v0v1.cross(v0v2).mag_sq();
+                        let magsq = v0v1.cross(&v0v2).norm_squared();
                         if magsq == 0. {
                             skipped_zero_area += 1;
                             continue;
@@ -94,35 +94,35 @@ pub fn load_scene(scene: args::Scene) -> Scene {
     let definition = match scene {
         args::Scene::AsianDragon => SceneDefinition {
             obj_path: String::from("./scenes/asian_dragon_obj/asian_dragon.obj"),
-            transform: Mat3::new(
-                Vec3::new(1. / 1000., 0., 0.),
-                Vec3::new(0., 0., 1. / 1000.),
-                Vec3::new(0., 1. / 1000., 0.),
-            )
-            .transposed(),
+            transform: Mat3f::from_columns(&[
+                Vec3f::new(1. / 1000., 0., 0.),
+                Vec3f::new(0., 0., 1. / 1000.),
+                Vec3f::new(0., 1. / 1000., 0.),
+            ])
+            .transpose(),
             camera: Camera::new(
-                Vec3::new(0.6, -1., 0.25).normalized() * 2.5,
-                Vec3::new(0., 0., 0.35),
-                Vec3::unit_z(),
+                Vec3f::new(0.6, -1., 0.25).normalize() * 2.5,
+                Vec3f::new(0., 0., 0.35),
+                Vec3f::new(0., 0., 1.),
                 60.,
             ),
-            light: PointLight::new(Vec3::new(5., -10., 5.), Vec3::one(), 300.),
+            light: PointLight::new(Vec3f::new(5., -10., 5.), Vec3f::from_element(1.), 300.),
         },
         args::Scene::SanMiguel => SceneDefinition {
             obj_path: String::from("./scenes/San_Miguel/san-miguel.obj"),
-            transform: Mat3::new(
-                Vec3::new(1., 0., 0.),
-                Vec3::new(0., 0., -1.),
-                Vec3::new(0., 1., 0.),
-            )
-            .transposed(),
+            transform: Mat3f::from_columns(&[
+                Vec3f::new(1., 0., 0.),
+                Vec3f::new(0., 0., -1.),
+                Vec3f::new(0., 1., 0.),
+            ])
+            .transpose(),
             camera: Camera::new(
-                Vec3::new(28., -1.65, 1.8),
-                Vec3::new(27., -1.65, 1.8),
-                Vec3::unit_z(),
+                Vec3f::new(28., -1.65, 1.8),
+                Vec3f::new(27., -1.65, 1.8),
+                Vec3f::new(0., 0., 1.),
                 60.,
             ),
-            light: PointLight::new(Vec3::new(20., -2.5, 3.), Vec3::one(), 20.),
+            light: PointLight::new(Vec3f::new(20., -2.5, 3.), Vec3f::from_element(1.), 20.),
         },
     };
 

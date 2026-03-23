@@ -1,29 +1,28 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, marker::PhantomData};
 
-use rand::Rng;
-use ultraviolet::{Rotor3, Rotor3x4, Rotor3x8, Vec3, Vec3x4, Vec3x8};
-use wide::{CmpEq as _, CmpGt as _, f32x4, f32x8};
+use nalgebra::{SimdBool, SimdRealField, SimdValue, Unit, UnitQuaternion, Vector3};
+use rand::{Rng, distributions::Standard, prelude::Distribution};
 
 use crate::{
-    brdf::{Brdf1, Brdf4, Brdf8},
+    brdf::{Brdf, Brdf1},
     light::PointLight,
-    utils::BlendRotor,
+    math::Vec3f,
 };
 
 pub const SHADOW_RAY_NEAR: f32 = 1e-5;
 
 #[derive(Clone)]
 pub struct PathInfo {
-    pub weight: Vec3,
+    pub weight: Vec3f,
     pub destination_idx: u32,
     pub bounces: u8,
 }
 
 impl PathInfo {
     #[inline]
-    pub fn diffuse(&self, weight: &Vec3) -> Self {
+    pub fn diffuse(&self, weight: &Vec3f) -> Self {
         PathInfo {
-            weight: self.weight * *weight,
+            weight: self.weight.component_mul(weight),
             bounces: self.bounces + 1,
             ..*self
         }
@@ -36,24 +35,24 @@ impl IntegratorsCommon1 {
     #[must_use]
     #[inline]
     pub fn sample_light(
-        dir_out: &Vec3,
-        normal: &Vec3,
-        hit_pos: &Vec3,
+        dir_out: &Vec3f,
+        normal: &Vec3f,
+        hit_pos: &Vec3f,
         light: &PointLight,
-    ) -> Option<(Vec3, f32, Vec3)> {
+    ) -> Option<(Vec3f, f32, Vec3f)> {
         let light_vec = light.pos - *hit_pos;
-        let ndotl = normal.dot(light_vec);
-        if ndotl * normal.dot(*dir_out) < 0. {
+        let ndotl = normal.dot(&light_vec);
+        if ndotl * normal.dot(dir_out) < 0. {
             return None;
         }
 
-        let light_dist_sq = light_vec.mag_sq();
+        let light_dist_sq = light_vec.norm_squared();
         let light_dist = light_dist_sq.sqrt();
         let dir_in = light_vec / light_dist;
         let ndotl = (ndotl / light_dist).abs();
-        let weight = Brdf1::eval() * ndotl * light.intensity / light_dist_sq;
+        let weight = light.intensity.component_mul(&Brdf1::eval()) * ndotl / light_dist_sq;
 
-        if weight != Vec3::zero() {
+        if weight != Vec3f::zeros() {
             Some((dir_in, light_dist, weight))
         } else {
             None
@@ -62,87 +61,91 @@ impl IntegratorsCommon1 {
 
     #[must_use]
     #[inline]
-    pub fn sample_diffuse_ray<R: Rng>(dir_out: &Vec3, normal: &Vec3, rng: &mut R) -> (Vec3, Vec3) {
-        let world_to_local = if *normal == -Vec3::unit_z() {
-            Rotor3::from_rotation_xz(PI)
-        } else {
-            Rotor3::from_rotation_between(*normal, Vec3::unit_z())
-        };
-        let local_to_world = world_to_local.reversed();
+    pub fn sample_diffuse_ray<R: Rng>(
+        dir_out: &Vec3f,
+        normal: &Vec3f,
+        rng: &mut R,
+    ) -> (Vec3f, Vec3f) {
+        let world_to_local = UnitQuaternion::rotation_between(normal, &Vec3f::z_axis())
+            .unwrap_or(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), PI));
         let dir_out_local = world_to_local * *dir_out;
 
         let (dir_in_local, pdf, brdf) = Brdf1::sample_eval(&dir_out_local, rng);
-        let dir_in = local_to_world * dir_in_local;
-        let ndotl = normal.dot(dir_in).abs();
+        let dir_in = world_to_local.inverse_transform_vector(&dir_in_local);
+        let ndotl = normal.dot(&dir_in).abs();
         let weight = brdf * ndotl / pdf;
 
-        debug_assert!(dir_in.as_array().iter().all(|f| f.is_normal()));
         (dir_in, weight)
     }
 }
 
-macro_rules! integrators_common_n {
-    ($(($n:ident, $t:ident, $vt:ident, $rt:ident, $bt:ident)),+) => {
-        $(
-            pub struct $n;
-
-            impl $n {
-                #[must_use]
-                #[inline]
-                pub fn sample_light(
-                    dir_out: &$vt,
-                    normal: &$vt,
-                    hit_pos: &$vt,
-                    valid: &$t,
-                    light: &PointLight,
-                ) -> ($vt, $t, $vt, $t) {
-                    let light_vec = $vt::splat(light.pos) - *hit_pos;
-                    let ndotl = normal.dot(light_vec);
-                    let mut mask = (ndotl * normal.dot(*dir_out)).cmp_gt($t::ZERO) & valid;
-                    if mask.none() {
-                        return ($vt::zero(), $t::ZERO, $vt::zero(), mask);
-                    }
-
-                    let light_dist_sq = light_vec.mag_sq();
-                    let light_dist = light_dist_sq.sqrt();
-                    let dir_in = light_vec / light_dist;
-                    let ndotl = (ndotl / light_dist).abs();
-                    let weight = $bt::eval() * ndotl * $vt::splat(light.intensity) / light_dist_sq;
-
-                    mask &= weight.mag_sq().cmp_gt($t::ZERO);
-
-                    (dir_in, light_dist, weight, mask)
-                }
-
-                #[must_use]
-                #[inline]
-                pub fn sample_diffuse_ray<R: Rng>(
-                    dir_out: &$vt,
-                    normal: &$vt,
-                    rng: &mut R,
-                ) -> ($vt, $vt) {
-                    let neg_z = -$vt::unit_z();
-                    let neg_z_mask = normal.x.cmp_eq(neg_z.x) & normal.y.cmp_eq(neg_z.y) & normal.z.cmp_eq(neg_z.z);
-                    let world_to_local = neg_z_mask.blend_rotor(
-                        &$rt::from_rotation_xz($t::PI),
-                        &$rt::from_rotation_between(*normal, $vt::unit_z()),
-                    );
-                    let local_to_world = world_to_local.reversed();
-
-                    let dir_out_local = world_to_local * *dir_out;
-                    let (dir_in_local, pdf, brdf) = $bt::sample_eval(&dir_out_local, rng);
-                    let dir_in = local_to_world * dir_in_local;
-                    let ndotl = normal.dot(dir_in).abs();
-                    let weight = brdf * ndotl / pdf;
-
-                    (dir_in, weight)
-                }
-            }
-        )+
-    }
+pub struct IntegratorsCommon<T> {
+    _phantom: PhantomData<T>,
 }
 
-integrators_common_n!(
-    (IntegratorsCommon4, f32x4, Vec3x4, Rotor3x4, Brdf4),
-    (IntegratorsCommon8, f32x8, Vec3x8, Rotor3x8, Brdf8)
-);
+impl<T> IntegratorsCommon<T>
+where
+    T: SimdRealField<Element = f32> + Copy,
+    Standard: Distribution<T>,
+{
+    #[must_use]
+    #[inline]
+    pub fn sample_light(
+        dir_out: &Vector3<T>,
+        normal: &Vector3<T>,
+        hit_pos: &Vector3<T>,
+        valid: &T::SimdBool,
+        light: &PointLight,
+    ) -> (Vector3<T>, T, Vector3<T>, T::SimdBool) {
+        let light_vec = Vector3::<T>::splat(light.pos) - *hit_pos;
+        let ndotl = normal.dot(&light_vec);
+        let mut mask = (ndotl * normal.dot(dir_out)).simd_gt(T::zero()) & *valid;
+        if mask.none() {
+            return (
+                Vector3::<T>::zeros(),
+                T::zero(),
+                Vector3::<T>::zeros(),
+                mask,
+            );
+        }
+
+        let light_dist_sq = light_vec.norm_squared();
+        let light_dist = light_dist_sq.simd_sqrt();
+        let dir_in = light_vec / light_dist;
+        let ndotl = (ndotl / light_dist).simd_abs();
+        let weight = Vector3::<T>::splat(light.intensity).component_mul(&Brdf::<T>::eval()) * ndotl
+            / light_dist_sq;
+
+        mask = mask & weight.norm_squared().simd_gt(T::zero());
+
+        (dir_in, light_dist, weight, mask)
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn sample_diffuse_ray<R: Rng>(
+        dir_out: &Vector3<T>,
+        normal: &Vector3<T>,
+        rng: &mut R,
+    ) -> (Vector3<T>, Vector3<T>) {
+        let neg_z = -Vector3::<T>::z_axis();
+        let neg_z_mask =
+            normal.x.simd_eq(neg_z.x) & normal.y.simd_eq(neg_z.y) & normal.z.simd_eq(neg_z.z);
+        let world_to_local = neg_z_mask.if_else(
+            || UnitQuaternion::from_axis_angle(&Vector3::<T>::y_axis(), T::simd_pi()),
+            || {
+                let b = Vector3::<T>::z_axis();
+                let axis = Unit::new_unchecked(normal.cross(&b));
+                UnitQuaternion::from_axis_angle(&axis, normal.dot(&b).simd_acos())
+            },
+        );
+
+        let dir_out_local = world_to_local * *dir_out;
+        let (dir_in_local, pdf, brdf) = Brdf::<T>::sample_eval(&dir_out_local, rng);
+        let dir_in = world_to_local.inverse_transform_vector(&dir_in_local);
+        let ndotl = normal.dot(&dir_in).simd_abs();
+        let weight = brdf * ndotl / pdf;
+
+        (dir_in, weight)
+    }
+}

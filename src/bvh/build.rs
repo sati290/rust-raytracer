@@ -1,8 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use ultraviolet::{Vec3, Vec3x4};
-
-use crate::{aabb::Aabb, bvh::*, mesh::TriangleMesh, triangle_opt::TriangleOpt};
+use crate::{aabb::Aabb, bvh::*, math::Vec3f, mesh::TriangleMesh, triangle_opt::TriangleOpt};
 
 #[derive(Default, Debug)]
 struct BvhStats {
@@ -67,7 +65,7 @@ impl Bvh {
     fn build_recursive(
         indices: &mut [usize],
         indices_start_idx: usize,
-        object_bounds: &[(Vec3, Aabb)],
+        object_bounds: &[(Vec3f, Aabb)],
         depth: u32,
         stats: &mut BvhStats,
     ) -> BvhNode {
@@ -92,7 +90,7 @@ impl Bvh {
 
                 let size = centroid_bounds.size();
 
-                if centroid_bounds.size().mag_sq() == 0. {
+                if centroid_bounds.size().norm_squared() == 0. {
                     println!(
                         "centroid_bounds.size() == 0, adding leaf with {} objects, depth {}",
                         indices.len(),
@@ -117,7 +115,7 @@ impl Bvh {
                 let k1 = BUCKET_COUNT as f32 * (1. - 0.01)
                     / (centroid_bounds.max[largest_axis] - centroid_bounds.min[largest_axis]);
                 let get_bucket_idx =
-                    |centroid: &Vec3| (k1 * (centroid[largest_axis] - k0)) as usize;
+                    |centroid: &Vec3f| (k1 * (centroid[largest_axis] - k0)) as usize;
                 for idx in &*indices {
                     let (centroid, aabb) = &object_bounds[*idx];
                     let bucket_idx = get_bucket_idx(centroid);
@@ -196,7 +194,7 @@ impl Bvh {
                 *stats += stats_r;
 
                 BvhNode::Inner {
-                    child_bbox: Vec3x4::from([
+                    child_bbox: Vec3x4f::from([
                         bounds_l.min,
                         bounds_r.min,
                         bounds_l.max,

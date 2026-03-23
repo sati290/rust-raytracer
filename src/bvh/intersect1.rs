@@ -11,11 +11,11 @@ impl Bvh {
 
         let mut stack = ArrayVec::<&BvhNode, 32>::new();
 
-        let origin_xyz_far = m128::from(*ray.origin_far.as_array());
+        let origin_xyz_far = m128::from_array(ray.origin_far.into());
         let origin_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(origin_xyz_far, origin_xyz_far);
         let origin_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(origin_xyz_far, origin_xyz_far);
         let origin_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(origin_xyz_far, origin_xyz_far);
-        let dir_recip_xyz_near = m128::from(*ray.direction_recip_near.as_array());
+        let dir_recip_xyz_near = m128::from_array(ray.direction_recip_near.into());
         let dir_recip_x =
             shuffle_abi_f32_all_m128::<0b00_00_00_00>(dir_recip_xyz_near, dir_recip_xyz_near);
         let dir_recip_y =
@@ -38,9 +38,9 @@ impl Bvh {
                 } => {
                     stats.inner_visit(1);
 
-                    let bb_min_max_x = m128::from(child_bbox.x.to_array());
-                    let bb_min_max_y = m128::from(child_bbox.y.to_array());
-                    let bb_min_max_z = m128::from(child_bbox.z.to_array());
+                    let bb_min_max_x = m128::from_array(child_bbox.x.into());
+                    let bb_min_max_y = m128::from_array(child_bbox.y.into());
+                    let bb_min_max_z = m128::from_array(child_bbox.z.into());
 
                     let bb_max_min_x =
                         shuffle_abi_f32_all_m128::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x);
@@ -114,11 +114,11 @@ impl Bvh {
         let mut hit_obj = None;
         let mut stack = ArrayVec::<&BvhNode, 32>::new();
 
-        let origin_xyz_far = m128::from(*ray.origin_far.as_array());
+        let origin_xyz_far = m128::from_array(ray.origin_far.into());
         let origin_x = shuffle_abi_f32_all_m128::<0b00_00_00_00>(origin_xyz_far, origin_xyz_far);
         let origin_y = shuffle_abi_f32_all_m128::<0b01_01_01_01>(origin_xyz_far, origin_xyz_far);
         let origin_z = shuffle_abi_f32_all_m128::<0b10_10_10_10>(origin_xyz_far, origin_xyz_far);
-        let dir_recip_xyz_near = m128::from(*ray.direction_recip_near.as_array());
+        let dir_recip_xyz_near = m128::from_array(ray.direction_recip_near.into());
         let dir_recip_x =
             shuffle_abi_f32_all_m128::<0b00_00_00_00>(dir_recip_xyz_near, dir_recip_xyz_near);
         let dir_recip_y =
@@ -141,9 +141,9 @@ impl Bvh {
                 } => {
                     stats.inner_visit(1);
 
-                    let bb_min_max_x = m128::from(child_bbox.x.to_array());
-                    let bb_min_max_y = m128::from(child_bbox.y.to_array());
-                    let bb_min_max_z = m128::from(child_bbox.z.to_array());
+                    let bb_min_max_x = m128::from_array(child_bbox.x.into());
+                    let bb_min_max_y = m128::from_array(child_bbox.y.into());
+                    let bb_min_max_z = m128::from_array(child_bbox.z.into());
 
                     let bb_max_min_x =
                         shuffle_abi_f32_all_m128::<0b01_00_11_10>(bb_min_max_x, bb_min_max_x);

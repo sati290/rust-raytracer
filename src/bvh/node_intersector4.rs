@@ -1,19 +1,27 @@
 use safe_arch::*;
-use ultraviolet::Vec3x4;
-use wide::f32x4;
+use simba::simd::{WideBoolF32x4, WideF32x4};
 
-use crate::bvh::simd_ray::SimdRay4;
+use crate::{
+    bvh::{node_intersector::BvhNodeIntersector, simd_ray::SimdRay4},
+    math::Vec3x4f,
+};
 
 pub struct BvhNodeIntersector4 {}
 
-impl BvhNodeIntersector4 {
+impl BvhNodeIntersector<WideF32x4> for BvhNodeIntersector4 {
+    type SimdRay = SimdRay4;
+
     #[inline(always)]
-    pub fn intersect(child_bbox: &Vec3x4, index: usize, ray: &SimdRay4) -> (f32x4, f32x4) {
+    fn intersect(
+        child_bbox: &Vec3x4f,
+        index: usize,
+        ray: &Self::SimdRay,
+    ) -> (WideBoolF32x4, WideF32x4) {
         // R1   R2   R3   R4
         // MINL MINR MAXL MAXR
-        let bbx = child_bbox.x.as_array_ref();
-        let bby = child_bbox.y.as_array_ref();
-        let bbz = child_bbox.z.as_array_ref();
+        let bbx = child_bbox.x.into_arr();
+        let bby = child_bbox.y.into_arr();
+        let bbz = child_bbox.z.into_arr();
 
         let bb_min_x = set_splat_m128(bbx[index]);
         let bb_min_y = set_splat_m128(bby[index]);
@@ -42,6 +50,9 @@ impl BvhNodeIntersector4 {
 
         let hit = cmp_le_mask_m128(max_m128(tnear, ray.near), min_m128(tfar, ray.far));
 
-        (hit.to_array().into(), tnear.to_array().into())
+        (
+            WideBoolF32x4::from_arr(hit.to_array()),
+            tnear.to_array().into(),
+        )
     }
 }

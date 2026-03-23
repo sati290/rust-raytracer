@@ -1,12 +1,12 @@
 use core::f32;
 
 use rand::Rng;
-use ultraviolet::{Vec3, Vec4};
 
 use crate::{
     Tile,
     camera::CameraRayGenerator,
     integrators::common::{IntegratorsCommon1, SHADOW_RAY_NEAR},
+    math::{Vec3f, Vec4f},
     ray::StreamRay,
     scene::Scene,
     trace_stats::TraceStats,
@@ -19,7 +19,7 @@ impl TileIntegrator1 {
         camera_ray: StreamRay,
         scene: &Scene,
         max_bounces: u8,
-        dest_pixel: &mut Vec4,
+        dest_pixel: &mut Vec4f,
         rng: &mut R,
         trace_stats: &mut TraceStats,
     ) {
@@ -31,7 +31,7 @@ impl TileIntegrator1 {
         } = scene;
 
         let mut bounces = 0;
-        let mut weight = Vec3::one();
+        let mut weight = Vec3f::from_element(1.);
         let mut ray = camera_ray;
 
         while let Some(hit) = bvh.intersect1(&mut ray, trace_stats) {
@@ -47,7 +47,8 @@ impl TileIntegrator1 {
                 let shadow_ray =
                     StreamRay::new(&hit_pos, &shadow_ray_dir, SHADOW_RAY_NEAR, shadow_far);
                 if !bvh.occluded1(&shadow_ray, trace_stats) {
-                    *dest_pixel += Vec4::from(weight * shadow_weight);
+                    let contrib = weight.component_mul(&shadow_weight);
+                    *dest_pixel += Vec4f::new(contrib.x, contrib.y, contrib.z, 0.);
                 }
             }
 
@@ -60,7 +61,7 @@ impl TileIntegrator1 {
                 IntegratorsCommon1::sample_diffuse_ray(&dir_out, normal, rng);
             ray = StreamRay::new(&hit_pos, &dir_in, SHADOW_RAY_NEAR, f32::INFINITY);
             bounces += 1;
-            weight *= diffuse_weight;
+            weight.component_mul_assign(&diffuse_weight);
         }
     }
 
@@ -81,7 +82,7 @@ impl TileIntegrator1 {
         while !ray_generator.is_done() {
             let dest_pixel = &mut tile.pixels[ray_generator.current_pixel_idx() as usize];
             for _ in 0..samples {
-                let ray_dir = ray_generator.sample(&mut tile.rng);
+                let ray_dir = ray_generator.sample1(&mut tile.rng);
 
                 Self::integrate_ray(
                     StreamRay::new(&scene.camera.position(), &ray_dir, 0., f32::INFINITY),
