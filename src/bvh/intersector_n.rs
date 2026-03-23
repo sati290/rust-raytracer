@@ -130,18 +130,16 @@ macro_rules! bvh_intersector_n {
                                 .zip(bvh.object_indices[triangles_range.clone()].iter())
                             {
                                 let hit = $triangle_intersector::intersect(obj, &ray_hit.ray.origin, &ray_hit.ray.direction);
-                                let hit_mask = (hit.cmp_ge(ray_hit.ray.near) & hit.cmp_lt(ray_hit.ray.far))
-                                    .move_mask() as u32;
-                                let hit: [f32; $n] = hit.into();
-                                let far = ray_hit.ray.far.as_array_mut();
-                                for i in 0..$n {
-                                    if hit_mask & 1 << i != 0 {
-                                        far[i] = hit[i];
-                                        ray_hit.obj_idx[i] = Some(obj_idx as u32);
+                                let hit_mask = hit.cmp_ge(ray_hit.ray.near) & hit.cmp_lt(ray_hit.ray.far);
+                                ray_hit.ray.far = hit_mask.blend(hit, ray_hit.ray.far);
+                                if hit_mask.any() {
+                                    let hit_mask = hit_mask.move_mask() as u32;
+                                    for i in 0..$n {
+                                        if hit_mask & 1 << i != 0 {
+                                            ray_hit.obj_idx[i] = Some(obj_idx as u32);
+                                        }
                                     }
-                                }
-                                if hit_mask != 0 {
-                                    simd_ray.update_far(far);
+                                    simd_ray.update_far(ray_hit.ray.far.as_array_ref());
                                 }
                             }
                         }
