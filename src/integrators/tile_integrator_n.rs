@@ -1,7 +1,7 @@
 use core::f32;
 use std::marker::PhantomData;
 
-use nalgebra::{SimdBool, SimdRealField, SimdValue, Vector3};
+use nalgebra::{SimdBool, SimdRealField, SimdValue, Vector3, vector};
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 
 use crate::{
@@ -62,7 +62,6 @@ where
 
             let hit_pos = ray_hit.ray.hit_pos();
             let dir_out = -ray_hit.ray.direction;
-            let normal = Vector3::<T>::from(normal);
 
             // Shadow ray
             let (shadow_ray_dir, shadow_far, shadow_weight, shadow_valid) =
@@ -81,10 +80,8 @@ where
                 let light_valid = shadow_valid & !occluded;
                 let contrib = light_valid
                     .if_else(|| weight.component_mul(&shadow_weight), Vector3::<T>::zeros);
-                for i in 0..T::LANES {
-                    let c = contrib.extract(i);
-                    *dest_pixel += Vec4f::new(c.x, c.y, c.z, 0.);
-                }
+                let c = contrib.map(|x| x.simd_horizontal_sum());
+                *dest_pixel += vector![c.x, c.y, c.z, 0.];
             }
 
             // Diffuse ray

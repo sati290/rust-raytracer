@@ -9,7 +9,7 @@ edition = "2024"
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 rayon = "1.5"
 wide = "0.7"
-rand = "0.8"
+rand = { version= "0.8", features = ["small_rng"] }
 obj = "0.10"
 arrayvec = "0.7"
 safe_arch = "1.0"

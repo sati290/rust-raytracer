@@ -23,7 +23,7 @@ use chrono::Local;
 use clap::Parser as _;
 use core::f32;
 use image::RgbImage;
-use rand::rngs::StdRng;
+use rand::rngs::{SmallRng, StdRng};
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use simba::simd::{WideF32x4, WideF32x8};
@@ -64,7 +64,7 @@ fn generate_tiles<'a, R: Rng>(
     image_height: u32,
     tile_size: u32,
     rng: &mut R,
-) -> Vec<Tile<'a, StdRng>> {
+) -> Vec<Tile<'a, SmallRng>> {
     let num_regions_x = image_width.div_ceil(tile_size);
     let num_regions_y = image_height.div_ceil(tile_size);
 
@@ -81,7 +81,7 @@ fn generate_tiles<'a, R: Rng>(
                 width,
                 height,
             };
-            batches.push(Tile::new(rect, StdRng::from_rng(&mut *rng).unwrap()));
+            batches.push(Tile::new(rect, SmallRng::from_rng(&mut *rng).unwrap()));
         }
     }
 
