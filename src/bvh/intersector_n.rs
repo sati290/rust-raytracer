@@ -49,11 +49,11 @@ where
                 stats.inner_visit(num_valid_rays as u64);
 
                 let mut hits = ArrayVec::<_, 2>::new();
-                for i in 0..2 {
+                for (i, c) in children.iter().enumerate().take(2) {
                     let (hit, _) = T::BvhNodeIntersector::intersect(child_bbox, i, &simd_ray);
 
                     if hit.any() {
-                        hits.push((&*children[i], hit));
+                        hits.push((c.as_ref(), hit));
                     }
                 }
 
@@ -108,12 +108,12 @@ where
                 stats.inner_visit(num_valid_rays as u64);
 
                 let mut hits = ArrayVec::<_, 2>::new();
-                for i in 0..2 {
+                for (i, c) in children.iter().enumerate().take(2) {
                     let (hit, near) = T::BvhNodeIntersector::intersect(child_bbox, i, &simd_ray);
 
                     if hit.any() {
                         let dist = hit.if_else(|| near, || T::splat(f32::INFINITY));
-                        hits.push((&*children[i], dist));
+                        hits.push((c.as_ref(), dist));
                     }
                 }
 

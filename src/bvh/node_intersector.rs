@@ -12,6 +12,7 @@ use crate::{
 pub trait BvhNodeIntersector<T: SimdRealField> {
     type SimdRay: SimdRay<T>;
 
+    #[must_use]
     fn intersect(child_bbox: &Vec3x4f, index: usize, ray: &Self::SimdRay) -> (T::SimdBool, T);
 }
 

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use nalgebra::{Scalar, SimdBool, SimdRealField, SimdValue, Vector3};
+use nalgebra::{SimdBool, SimdRealField, SimdValue, Vector3};
 
 use crate::triangle_opt::TriangleOpt;
 
@@ -10,7 +10,7 @@ pub struct TriangleIntersector<T> {
 
 impl<T> TriangleIntersector<T>
 where
-    T: Copy + Scalar + SimdRealField<Element = f32>,
+    T: Copy + SimdRealField<Element = f32>,
 {
     #[must_use]
     #[inline]
