@@ -1,12 +1,12 @@
-use std::{f32::consts::PI, marker::PhantomData};
+use std::marker::PhantomData;
 
-use nalgebra::{SimdBool, SimdRealField, SimdValue, Unit, UnitQuaternion, Vector3};
+use nalgebra::{SimdBool, SimdRealField, SimdValue, Vector3};
 use rand::{Rng, distributions::Standard, prelude::Distribution};
 
 use crate::{
     brdf::{Brdf, Brdf1},
     light::PointLight,
-    math::Vec3f,
+    math::{Vec3f, fast_rotation_between},
 };
 
 pub const SHADOW_RAY_NEAR: f32 = 1e-5;
@@ -66,8 +66,7 @@ impl IntegratorsCommon1 {
         normal: &Vec3f,
         rng: &mut R,
     ) -> (Vec3f, Vec3f) {
-        let world_to_local = UnitQuaternion::rotation_between(normal, &Vec3f::z_axis())
-            .unwrap_or(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), PI));
+        let world_to_local = fast_rotation_between(normal, &Vec3f::z_axis());
         let dir_out_local = world_to_local * *dir_out;
 
         let (dir_in_local, pdf, brdf) = Brdf1::sample_eval(&dir_out_local, rng);
@@ -128,17 +127,7 @@ where
         normal: &Vector3<T>,
         rng: &mut R,
     ) -> (Vector3<T>, Vector3<T>) {
-        let neg_z = -Vector3::<T>::z_axis();
-        let neg_z_mask =
-            normal.x.simd_eq(neg_z.x) & normal.y.simd_eq(neg_z.y) & normal.z.simd_eq(neg_z.z);
-        let world_to_local = neg_z_mask.if_else(
-            || UnitQuaternion::from_axis_angle(&Vector3::<T>::y_axis(), T::simd_pi()),
-            || {
-                let b = Vector3::<T>::z_axis();
-                let axis = Unit::new_unchecked(normal.cross(&b));
-                UnitQuaternion::from_axis_angle(&axis, normal.dot(&b).simd_acos())
-            },
-        );
+        let world_to_local = fast_rotation_between(normal, &Vector3::<T>::z_axis());
 
         let dir_out_local = world_to_local * *dir_out;
         let (dir_in_local, pdf, brdf) = Brdf::<T>::sample_eval(&dir_out_local, rng);

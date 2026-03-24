@@ -2,7 +2,10 @@ use hybrid_array::{
     ArraySize,
     sizes::{U4, U8},
 };
-use nalgebra::{Matrix3, SimdBool, SimdValue, Vector2, Vector3, Vector4};
+use nalgebra::{
+    Matrix3, Quaternion, SimdBool, SimdRealField, SimdValue, UnitQuaternion, Vector2, Vector3,
+    Vector4,
+};
 use simba::simd::{WideF32x4, WideF32x8};
 
 pub type Vec2f = Vector2<f32>;
@@ -26,6 +29,7 @@ impl SimdType for WideF32x8 {
 }
 
 pub trait SimdBoolSplat {
+    #[must_use]
     fn splat(val: bool) -> Self;
 }
 
@@ -33,7 +37,22 @@ impl<T> SimdBoolSplat for T
 where
     T: SimdBool + SimdValue<Element = bool>,
 {
+    #[inline]
     fn splat(val: bool) -> Self {
         Self::splat(val)
     }
+}
+
+#[must_use]
+#[inline]
+pub fn fast_rotation_between<T>(from: &Vector3<T>, to: &Vector3<T>) -> UnitQuaternion<T>
+where
+    T: SimdRealField<Element: SimdRealField>,
+{
+    let dot = from.dot(to);
+    let opposite_mask = dot.clone().simd_eq(-T::one());
+    opposite_mask.if_else(
+        || UnitQuaternion::from_scaled_axis(Vector3::<T>::y() * T::simd_pi()),
+        || UnitQuaternion::new_normalize(Quaternion::from_parts(T::one() + dot, from.cross(to))),
+    )
 }

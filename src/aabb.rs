@@ -42,27 +42,27 @@ impl Aabb {
     #[must_use]
     pub fn _grow(&self, point: &Vec3f) -> Aabb {
         Aabb {
-            min: self.min.zip_map(point, |a, b| a.min(b)),
-            max: self.max.zip_map(point, |a, b| a.max(b)),
+            min: self.min.inf(point),
+            max: self.max.sup(point),
         }
     }
 
     pub fn grow_mut(&mut self, point: &Vec3f) {
-        self.min = self.min.zip_map(point, |a, b| a.min(b));
-        self.max = self.max.zip_map(point, |a, b| a.max(b));
+        self.min = self.min.inf(point);
+        self.max = self.max.sup(point);
     }
 
     #[must_use]
     pub fn join(&self, other: &Aabb) -> Aabb {
         Aabb {
-            min: self.min.zip_map(&other.min, |a, b| a.min(b)),
-            max: self.max.zip_map(&other.max, |a, b| a.max(b)),
+            min: self.min.inf(&other.min),
+            max: self.max.sup(&other.max),
         }
     }
 
     pub fn join_mut(&mut self, other: &Aabb) {
-        self.min = self.min.zip_map(&other.min, |a, b| a.min(b));
-        self.max = self.max.zip_map(&other.max, |a, b| a.max(b));
+        self.min = self.min.inf(&other.min);
+        self.max = self.max.sup(&other.max);
     }
 
     #[must_use]
