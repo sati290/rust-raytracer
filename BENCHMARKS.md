@@ -9,6 +9,7 @@ SanMiguel, max bounces 1, release, average of two runs
 | 230bc34            | 5.22         | 5.80                         | 5.97         | 6.04         | Inline hints                |
 | 71c68f5            | 5.40 (38.76) |                              | 6.28 (45)    | 6.02 (43.15) | Ray far update optimization |
 | 3e81681 (nalgebra) | 5.34 (38.32) |                              | 6.17 (44.26) | 6.06 (43.44) | Switch to nalgebra          |
+| ee0d7dd (nalgebra) | 5.36 (38.64) |                              | 6.19 (44.35) | 6.13 (43.98) | Nalgebra optimizations      |
 
 SanMiguel, max bounces 1, release-lto, average of two runs
 
@@ -21,3 +22,4 @@ SanMiguel, max bounces 1, release-lto, average of two runs
 | 230bc34            |         |                              | 6.16         | 6.13         |
 | 71c68f5            |         |                              | 6.25 (44.86) | 6.15 (44.11) |
 | 3e81681 (nalgebra) |         |                              | 6.21 (44.60) | 6.16 (44.17) |
+| ee0d7dd (nalgebra) |         |                              | 6.25 (44.79) | 6.21 (44.55) |
