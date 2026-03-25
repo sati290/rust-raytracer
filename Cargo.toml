@@ -41,3 +41,4 @@ codegen-units = 1
 [profile.dev-opt]
 inherits = "dev"
 opt-level = 1
+debug-assertions = true

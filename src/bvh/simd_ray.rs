@@ -1,15 +1,18 @@
+use std::fmt::Debug;
+
 use safe_arch::*;
-use simba::simd::{WideF32x4, WideF32x8};
+use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue, WideF32x4, WideF32x8};
 
 use crate::ray::Ray;
 
-pub trait SimdRay<T>: for<'a> From<&'a Ray<T>> {
+pub trait SimdRay<T>: for<'a> From<&'a Ray<T>> + Debug {
     fn update_far(&mut self, far: &T);
 }
 
 macro_rules! simd_ray_n {
     ($(($name:ident, $n:literal, $st:ident, $t:ty, $splat:ident)),+) => {
         $(
+            #[derive(Debug)]
             pub struct $name {
                 pub dir_recip_x: $st,
                 pub dir_recip_y: $st,
@@ -39,9 +42,12 @@ macro_rules! simd_ray_n {
                     let near = $st::from_array(ray.near.into());
                     let far = $st::from_array(ray.far.into());
 
-                    let dir_x = $st::from_array(ray.direction.x.into());
-                    let dir_y = $st::from_array(ray.direction.y.into());
-                    let dir_z = $st::from_array(ray.direction.z.into());
+                    // Avoid dividing by zero
+                    let recip_min = <$t>::splat(1e-24);
+                    let dir = ray.direction.map(|f| f.simd_abs().simd_lt(recip_min).if_else(|| recip_min, || f));
+                    let dir_x = $st::from_array(dir.x.into());
+                    let dir_y = $st::from_array(dir.y.into());
+                    let dir_z = $st::from_array(dir.z.into());
 
                     let one = $splat(1.);
                     let dir_recip_x = one / dir_x;
